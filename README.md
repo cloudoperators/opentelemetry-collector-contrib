@@ -1,3 +1,4 @@
+**This is a fork made by cloudoperators for SAP. The purpose for this fork is to add customised components to the OpenTelemetryCollector landscape.**
 ---
 
 <p align="center">
