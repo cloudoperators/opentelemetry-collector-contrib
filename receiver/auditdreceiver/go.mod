@@ -1,4 +1,4 @@
-module github.com/olandr/opentelemetry-collector-contrib/receiver/auditdreceiver
+module github.com/cloudoperators/opentelemetry-collector-contrib/receiver/auditdreceiver
 
 go 1.23.0
 
