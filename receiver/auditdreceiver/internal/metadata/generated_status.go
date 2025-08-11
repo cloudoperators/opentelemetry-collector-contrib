@@ -8,7 +8,7 @@ import (
 
 var (
 	Type      = component.MustNewType("auditd")
-	ScopeName = "github.com/olandr/opentelemetry-collector-contrib/receiver/auditdreceiver"
+	ScopeName = "github.com/cloudoperators/opentelemetry-collector-contrib/receiver/auditdreceiver"
 )
 
 const (
