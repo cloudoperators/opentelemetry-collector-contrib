@@ -9,6 +9,7 @@ import (
 	"io"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/elastic/go-libaudit/v2"
@@ -25,7 +26,8 @@ import (
 )
 
 var (
-	PATTERN = regexp.MustCompile(`audit\((\d+)\.(\d+):(\d+)\):`)
+	PATTERN                = regexp.MustCompile(`audit\((\d+)\.(\d+):(\d+)\):`)
+	ErrorRuleAlreadyExists = "rule exists"
 )
 
 type Auditd struct {
@@ -130,7 +132,11 @@ func (aud *Auditd) prepareRules() error {
 		}
 		err = aud.client.AddRule(wireRule)
 		if err != nil {
-			return fmt.Errorf("[ERROR] failed to add rule: %v. (%v)", rawRule, err)
+			if strings.Contains(err.Error(), ErrorRuleAlreadyExists) {
+				aud.logger.Warn("rule already exists (skipping)", zap.Error(err))
+			} else {
+				return fmt.Errorf("[ERROR] failed to add rule: %v. (%v)", rawRule, err)
+			}
 		}
 	}
 	return nil
