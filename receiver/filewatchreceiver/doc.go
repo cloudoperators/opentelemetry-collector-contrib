@@ -4,4 +4,4 @@
 //go:generate mdatagen metadata.yaml
 
 // Package filewatchreceiver bars.
-package filewatchreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/filewatchreceiver"
+package filewatchreceiver // import "github.com/cloudoperators/opentelemetry-collector-contrib/receiver/filewatchreceiver"

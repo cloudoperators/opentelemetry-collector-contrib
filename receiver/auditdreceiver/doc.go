@@ -4,4 +4,4 @@
 //go:generate mdatagen metadata.yaml
 
 // Package auditdreceiver bars.
-package auditdreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/auditdreceiver"
+package auditdreceiver // import "github.com/cloudoperators/opentelemetry-collector-contrib/receiver/auditdreceiver"

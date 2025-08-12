@@ -124,18 +124,18 @@ func (aud *Auditd) prepareRules() error {
 	for _, rawRule := range aud.rules {
 		r, err := flags.Parse(rawRule)
 		if err != nil {
-			return fmt.Errorf("[ERROR] failed to parse rule %w", err)
+			return fmt.Errorf("failed to parse rule %w", err)
 		}
 		wireRule, err := rule.Build(r)
 		if err != nil {
-			return fmt.Errorf("[ERROR] failed to build rule %w", err)
+			return fmt.Errorf("failed to build rule %w", err)
 		}
 		err = aud.client.AddRule(wireRule)
 		if err != nil {
 			if strings.Contains(err.Error(), ErrorRuleAlreadyExists) {
 				aud.logger.Warn("rule already exists (skipping)", zap.Error(err))
 			} else {
-				return fmt.Errorf("[ERROR] failed to add rule: %v. (%v)", rawRule, err)
+				return fmt.Errorf("failed to add rule: %v. (%v)", rawRule, err)
 			}
 		}
 	}
