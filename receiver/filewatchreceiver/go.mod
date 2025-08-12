@@ -1,4 +1,4 @@
-module github.com/cloudoperators/opentelemetry-collector-contrib/receiver/filewatchreceiver
+module github.com/open-telemetry/opentelemetry-collector-contrib/receiver/filewatchreceiver
 
 go 1.24.2
 
