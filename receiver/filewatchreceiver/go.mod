@@ -63,3 +63,5 @@ require (
 	google.golang.org/protobuf v1.36.7 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/open-telemetry/opentelemetry-collector-contrib/receiver/filewatchreceiver => github.com/cloudoperators/opentelemetry-collector-contrib/receiver/filewatchreceiver v0.0.0-20250812090527-f2969a901829
