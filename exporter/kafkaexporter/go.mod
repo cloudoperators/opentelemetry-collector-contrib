@@ -1,4 +1,4 @@
-module github.com/cloudoperators/opentelemetry-collector-contrib/exporter/kafkaexporter
+module github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter
 
 go 1.24.0
 
@@ -131,6 +131,8 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter => ../../exporter/kafkaexporter
 
 replace github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal => ../../internal/coreinternal
 
