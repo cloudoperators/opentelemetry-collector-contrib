@@ -13,7 +13,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/pprofile"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/marshaler"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/marshaler"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/zipkin/zipkinv2"
 )
 
@@ -76,6 +76,8 @@ func getLogsMarshaler(encoding string, host component.Host) (marshaler.LogsMarsh
 		return marshaler.NewPdataLogsMarshaler(&plog.JSONMarshaler{}), nil
 	case "raw":
 		return marshaler.RawLogsMarshaler{}, nil
+	case "opensearch_json":
+		return &marshaler.OpenSearchLogsMarshaler{}, nil
 	}
 	return nil, fmt.Errorf("unrecognized logs encoding %q", encoding)
 }
