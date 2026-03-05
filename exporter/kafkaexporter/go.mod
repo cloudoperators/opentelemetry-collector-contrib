@@ -15,7 +15,7 @@ require (
 	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/jaeger v0.147.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/zipkin v0.147.0
 	github.com/stretchr/testify v1.11.1
-	github.com/twmb/franz-go v1.20.6
+	github.com/twmb/franz-go v1.20.7
 	github.com/twmb/franz-go/pkg/kfake v0.0.0-20251021233722-4ca18825d8c0
 	github.com/twmb/franz-go/pkg/kmsg v1.12.0
 	go.opentelemetry.io/collector/client v1.53.0
@@ -35,10 +35,10 @@ require (
 	go.opentelemetry.io/collector/pdata v1.53.0
 	go.opentelemetry.io/collector/pdata/pprofile v0.147.0
 	go.opentelemetry.io/collector/pdata/testdata v0.147.0
-	go.opentelemetry.io/otel v1.39.0
-	go.opentelemetry.io/otel/metric v1.39.0
-	go.opentelemetry.io/otel/sdk/metric v1.39.0
-	go.opentelemetry.io/otel/trace v1.39.0
+	go.opentelemetry.io/otel v1.40.0
+	go.opentelemetry.io/otel/metric v1.40.0
+	go.opentelemetry.io/otel/sdk/metric v1.40.0
+	go.opentelemetry.io/otel/trace v1.40.0
 	go.uber.org/goleak v1.3.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.1
