@@ -1,44 +1,44 @@
 module github.com/cloudoperators/opentelemetry-collector-contrib/exporter/kafkaexporter
 
-go 1.24.0
+go 1.25.0
 
 require (
-	github.com/cloudoperators/opentelemetry-collector-contrib/internal/coreinternal v0.144.1
-	github.com/cloudoperators/opentelemetry-collector-contrib/internal/kafka v0.144.1
+	github.com/cloudoperators/opentelemetry-collector-contrib/internal/coreinternal v0.147.0
+	github.com/cloudoperators/opentelemetry-collector-contrib/internal/kafka v0.147.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/jaegertracing/jaeger-idl v0.6.0
-	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/batchpersignal v0.144.0
-	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/kafka/configkafka v0.144.0
-	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/kafka/topic v0.144.0
-	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatatest v0.144.0
-	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatautil v0.144.0
-	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/jaeger v0.144.0
-	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/zipkin v0.144.0
+	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/batchpersignal v0.147.0
+	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/kafka/configkafka v0.147.0
+	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/kafka/topic v0.147.0
+	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatatest v0.147.0
+	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatautil v0.147.0
+	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/jaeger v0.147.0
+	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/zipkin v0.147.0
 	github.com/stretchr/testify v1.11.1
-	github.com/twmb/franz-go v1.20.6
+	github.com/twmb/franz-go v1.20.7
 	github.com/twmb/franz-go/pkg/kfake v0.0.0-20251021233722-4ca18825d8c0
 	github.com/twmb/franz-go/pkg/kmsg v1.12.0
-	go.opentelemetry.io/collector/client v1.50.1-0.20260121161034-55399d4743af
-	go.opentelemetry.io/collector/component v1.50.1-0.20260121161034-55399d4743af
-	go.opentelemetry.io/collector/component/componenttest v0.144.1-0.20260121161034-55399d4743af
-	go.opentelemetry.io/collector/config/configoptional v1.50.1-0.20260121161034-55399d4743af
-	go.opentelemetry.io/collector/config/configretry v1.50.1-0.20260121161034-55399d4743af
-	go.opentelemetry.io/collector/confmap v1.50.1-0.20260121161034-55399d4743af
-	go.opentelemetry.io/collector/confmap/xconfmap v0.144.1-0.20260121161034-55399d4743af
-	go.opentelemetry.io/collector/consumer v1.50.1-0.20260121161034-55399d4743af
-	go.opentelemetry.io/collector/consumer/consumererror v0.144.1-0.20260121161034-55399d4743af
-	go.opentelemetry.io/collector/exporter v1.50.1-0.20260121161034-55399d4743af
-	go.opentelemetry.io/collector/exporter/exporterhelper v0.144.1-0.20260121161034-55399d4743af
-	go.opentelemetry.io/collector/exporter/exporterhelper/xexporterhelper v0.144.1-0.20260121161034-55399d4743af
-	go.opentelemetry.io/collector/exporter/exportertest v0.144.1-0.20260121161034-55399d4743af
-	go.opentelemetry.io/collector/exporter/xexporter v0.144.1-0.20260121161034-55399d4743af
-	go.opentelemetry.io/collector/pdata v1.50.1-0.20260121161034-55399d4743af
-	go.opentelemetry.io/collector/pdata/pprofile v0.144.1-0.20260121161034-55399d4743af
-	go.opentelemetry.io/collector/pdata/testdata v0.144.1-0.20260121161034-55399d4743af
-	go.opentelemetry.io/otel v1.39.0
-	go.opentelemetry.io/otel/metric v1.39.0
-	go.opentelemetry.io/otel/sdk/metric v1.39.0
-	go.opentelemetry.io/otel/trace v1.39.0
+	go.opentelemetry.io/collector/client v1.53.0
+	go.opentelemetry.io/collector/component v1.53.0
+	go.opentelemetry.io/collector/component/componenttest v0.147.0
+	go.opentelemetry.io/collector/config/configoptional v1.53.0
+	go.opentelemetry.io/collector/config/configretry v1.53.0
+	go.opentelemetry.io/collector/confmap v1.53.0
+	go.opentelemetry.io/collector/confmap/xconfmap v0.147.0
+	go.opentelemetry.io/collector/consumer v1.53.0
+	go.opentelemetry.io/collector/consumer/consumererror v0.147.0
+	go.opentelemetry.io/collector/exporter v1.53.0
+	go.opentelemetry.io/collector/exporter/exporterhelper v0.147.0
+	go.opentelemetry.io/collector/exporter/exporterhelper/xexporterhelper v0.147.0
+	go.opentelemetry.io/collector/exporter/exportertest v0.147.0
+	go.opentelemetry.io/collector/exporter/xexporter v0.147.0
+	go.opentelemetry.io/collector/pdata v1.53.0
+	go.opentelemetry.io/collector/pdata/pprofile v0.147.0
+	go.opentelemetry.io/collector/pdata/testdata v0.147.0
+	go.opentelemetry.io/otel v1.40.0
+	go.opentelemetry.io/otel/metric v1.40.0
+	go.opentelemetry.io/otel/sdk/metric v1.40.0
+	go.opentelemetry.io/otel/trace v1.40.0
 	go.uber.org/goleak v1.3.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.1
