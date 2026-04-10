@@ -7,10 +7,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
-	"fmt"
 	"strconv"
 	"time"
+	"unicode/utf8"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/pdata/pcommon"
@@ -20,6 +19,9 @@ import (
 )
 
 var _ encoding.LogsMarshalerExtension = (*opensearchLogExtension)(nil)
+
+// estimatedBytesPerRecord is a rough estimate for pre-sizing the output buffer.
+const estimatedBytesPerRecord = 256
 
 type opensearchLogExtension struct{}
 
@@ -36,7 +38,7 @@ func (e *opensearchLogExtension) MarshalLogs(ld plog.Logs) ([]byte, error) {
 		return nil, nil
 	}
 
-	var out bytes.Buffer
+	out := bytes.NewBuffer(make([]byte, 0, total*estimatedBytesPerRecord))
 	first := true
 	for i := range ld.ResourceLogs().Len() {
 		rl := ld.ResourceLogs().At(i)
@@ -47,7 +49,7 @@ func (e *opensearchLogExtension) MarshalLogs(ld plog.Logs) ([]byte, error) {
 					out.WriteByte('\n')
 				}
 				first = false
-				encodeRecord(&out, sl.LogRecords().At(k), rl.Resource(), sl.Scope(), sl.SchemaUrl())
+				encodeRecord(out, sl.LogRecords().At(k), rl.Resource(), sl.Scope(), sl.SchemaUrl())
 			}
 		}
 	}
@@ -55,28 +57,45 @@ func (e *opensearchLogExtension) MarshalLogs(ld plog.Logs) ([]byte, error) {
 }
 
 func encodeRecord(b *bytes.Buffer, r plog.LogRecord, res pcommon.Resource, scope pcommon.InstrumentationScope, schemaURL string) {
-	fmt.Fprintf(b, `{"@timestamp":%s,"body":%s`, fmtTimestamp(r.Timestamp()), jsonQuote(r.Body().AsString()))
+	b.WriteString(`{"@timestamp":`)
+	writeTimestamp(b, r.Timestamp())
+	b.WriteString(`,"body":`)
+	writeJSONString(b, r.Body().AsString())
 	if r.ObservedTimestamp() != 0 {
-		fmt.Fprintf(b, `,"observedTimestamp":%s`, fmtTimestamp(r.ObservedTimestamp()))
+		b.WriteString(`,"observedTimestamp":`)
+		writeTimestamp(b, r.ObservedTimestamp())
 	}
 	if !r.TraceID().IsEmpty() {
 		tid := r.TraceID()
-		fmt.Fprintf(b, `,"traceId":"%s"`, hex.EncodeToString(tid[:]))
+		b.WriteString(`,"traceId":"`)
+		b.WriteString(hex.EncodeToString(tid[:]))
+		b.WriteByte('"')
 	}
 	if !r.SpanID().IsEmpty() {
 		sid := r.SpanID()
-		fmt.Fprintf(b, `,"spanId":"%s"`, hex.EncodeToString(sid[:]))
+		b.WriteString(`,"spanId":"`)
+		b.WriteString(hex.EncodeToString(sid[:]))
+		b.WriteByte('"')
 	}
-	fmt.Fprintf(b, `,"severity":{"text":%s,"number":%d},"attributes":`, jsonQuote(r.SeverityText()), r.SeverityNumber())
+	b.WriteString(`,"severity":{"text":`)
+	writeJSONString(b, r.SeverityText())
+	b.WriteString(`,"number":`)
+	b.WriteString(strconv.FormatInt(int64(r.SeverityNumber()), 10))
+	b.WriteString(`},"attributes":`)
 	writeMap(b, r.Attributes(), false)
 	b.WriteString(`,"resource":`)
 	writeMap(b, res.Attributes(), true)
 	if schemaURL != "" {
-		fmt.Fprintf(b, `,"schemaUrl":%s`, jsonQuote(schemaURL))
+		b.WriteString(`,"schemaUrl":`)
+		writeJSONString(b, schemaURL)
 	}
-	fmt.Fprintf(b, `,"instrumentationScope":{"name":%s,"version":%s`, jsonQuote(scope.Name()), jsonQuote(scope.Version()))
+	b.WriteString(`,"instrumentationScope":{"name":`)
+	writeJSONString(b, scope.Name())
+	b.WriteString(`,"version":`)
+	writeJSONString(b, scope.Version())
 	if schemaURL != "" {
-		fmt.Fprintf(b, `,"schemaUrl":%s`, jsonQuote(schemaURL))
+		b.WriteString(`,"schemaUrl":`)
+		writeJSONString(b, schemaURL)
 	}
 	if scope.Attributes().Len() > 0 {
 		b.WriteString(`,"attributes":`)
@@ -85,11 +104,14 @@ func encodeRecord(b *bytes.Buffer, r plog.LogRecord, res pcommon.Resource, scope
 	b.WriteString("}}")
 }
 
-func fmtTimestamp(ts pcommon.Timestamp) string {
+func writeTimestamp(b *bytes.Buffer, ts pcommon.Timestamp) {
 	if ts == 0 {
-		return "null"
+		b.WriteString("null")
+		return
 	}
-	return jsonQuote(ts.AsTime().Format(time.RFC3339Nano))
+	b.WriteByte('"')
+	b.WriteString(ts.AsTime().Format(time.RFC3339Nano))
+	b.WriteByte('"')
 }
 
 func writeMap(b *bytes.Buffer, m pcommon.Map, strVal bool) {
@@ -100,10 +122,10 @@ func writeMap(b *bytes.Buffer, m pcommon.Map, strVal bool) {
 			b.WriteByte(',')
 		}
 		first = false
-		b.WriteString(jsonQuote(k))
+		writeJSONString(b, k)
 		b.WriteByte(':')
 		if strVal {
-			b.WriteString(jsonQuote(v.AsString()))
+			writeJSONString(b, v.AsString())
 		} else {
 			writeVal(b, v)
 		}
@@ -115,7 +137,7 @@ func writeMap(b *bytes.Buffer, m pcommon.Map, strVal bool) {
 func writeVal(b *bytes.Buffer, v pcommon.Value) {
 	switch v.Type() {
 	case pcommon.ValueTypeStr:
-		b.WriteString(jsonQuote(v.Str()))
+		writeJSONString(b, v.Str())
 	case pcommon.ValueTypeBool:
 		b.WriteString(strconv.FormatBool(v.Bool()))
 	case pcommon.ValueTypeInt:
@@ -134,16 +156,68 @@ func writeVal(b *bytes.Buffer, v pcommon.Value) {
 		}
 		b.WriteByte(']')
 	case pcommon.ValueTypeBytes:
-		fmt.Fprintf(b, `"%s"`, hex.EncodeToString(v.Bytes().AsRaw()))
+		b.WriteByte('"')
+		b.WriteString(hex.EncodeToString(v.Bytes().AsRaw()))
+		b.WriteByte('"')
 	default:
 		b.WriteString("null")
 	}
 }
 
-// jsonQuote returns s as a JSON-escaped quoted string.
-func jsonQuote(s string) string {
-	b, _ := json.Marshal(s) //nolint:errcheck // json.Marshal on a string cannot fail
-	return string(b)
+// hexTable is a lookup table for hex encoding JSON unicode escapes.
+const hexChars = "0123456789abcdef"
+
+// writeJSONString writes s as a JSON-escaped quoted string directly to b,
+// avoiding the allocation that json.Marshal would incur.
+func writeJSONString(b *bytes.Buffer, s string) {
+	b.WriteByte('"')
+	start := 0
+	for i := 0; i < len(s); {
+		c := s[i]
+		if c >= utf8.RuneSelf {
+			// Multi-byte UTF-8: valid JSON, pass through.
+			_, size := utf8.DecodeRuneInString(s[i:])
+			i += size
+			continue
+		}
+		// Single-byte: check if it needs escaping.
+		var esc string
+		switch c {
+		case '"':
+			esc = `\"`
+		case '\\':
+			esc = `\\`
+		case '\b':
+			esc = `\b`
+		case '\f':
+			esc = `\f`
+		case '\n':
+			esc = `\n`
+		case '\r':
+			esc = `\r`
+		case '\t':
+			esc = `\t`
+		default:
+			if c < 0x20 {
+				// Control character: \u00XX
+				b.WriteString(s[start:i])
+				b.WriteString(`\u00`)
+				b.WriteByte(hexChars[c>>4])
+				b.WriteByte(hexChars[c&0xf])
+				i++
+				start = i
+				continue
+			}
+			i++
+			continue
+		}
+		b.WriteString(s[start:i])
+		b.WriteString(esc)
+		i++
+		start = i
+	}
+	b.WriteString(s[start:])
+	b.WriteByte('"')
 }
 
 func (*opensearchLogExtension) Start(context.Context, component.Host) error {
