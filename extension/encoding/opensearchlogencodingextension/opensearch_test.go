@@ -341,3 +341,30 @@ func BenchmarkMarshalLogs(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkMarshalLogs_OTLPJSONComparison(b *testing.B) {
+	logs := buildBenchLogs(1000)
+	otlp := &plog.JSONMarshaler{}
+	ss4o := &opensearchLogExtension{}
+
+	b.Run("otlp_json", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			result, err := otlp.MarshalLogs(logs)
+			if err != nil {
+				b.Fatal(err)
+			}
+			_ = result
+		}
+	})
+	b.Run("ss4o_ndjson", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			result, err := ss4o.MarshalLogs(logs)
+			if err != nil {
+				b.Fatal(err)
+			}
+			_ = result
+		}
+	})
+}
