@@ -3,6 +3,7 @@ package marshaler
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -11,8 +12,8 @@ import (
 	"go.opentelemetry.io/collector/pdata/plog"
 )
 
-// OpenSearchLogsMarshaler marshals logs to OpenSearch SS4O JSON format.
-type OpenSearchLogsMarshaler struct{ UnixTimestamps bool }
+// OpenSearchLogsMarshaler marshals logs to OpenSearch SS4O JSON.
+type OpenSearchLogsMarshaler struct{}
 
 func (m *OpenSearchLogsMarshaler) MarshalLogs(logs plog.Logs) ([]Message, error) {
 	var total int
@@ -48,7 +49,7 @@ func (m *OpenSearchLogsMarshaler) MarshalLogs(logs plog.Logs) ([]Message, error)
 }
 
 func (m *OpenSearchLogsMarshaler) encode(b *bytes.Buffer, r plog.LogRecord, res pcommon.Resource, scope pcommon.InstrumentationScope, schema string) {
-	fmt.Fprintf(b, `{"@timestamp":%s,"body":%s`, m.fmtTS(r.Timestamp()), strconv.Quote(r.Body().AsString()))
+	fmt.Fprintf(b, `{"@timestamp":%s,"body":%s`, m.fmtTS(r.Timestamp()), jsonQuote(r.Body().AsString()))
 	if r.ObservedTimestamp() != 0 {
 		fmt.Fprintf(b, `,"observedTimestamp":%s`, m.fmtTS(r.ObservedTimestamp()))
 	}
@@ -60,16 +61,16 @@ func (m *OpenSearchLogsMarshaler) encode(b *bytes.Buffer, r plog.LogRecord, res 
 		s := r.SpanID()
 		fmt.Fprintf(b, `,"spanId":"%s"`, hex.EncodeToString(s[:]))
 	}
-	fmt.Fprintf(b, `,"severity":{"text":%s,"number":%d},"attributes":`, strconv.Quote(r.SeverityText()), r.SeverityNumber())
+	fmt.Fprintf(b, `,"severity":{"text":%s,"number":%d},"attributes":`, jsonQuote(r.SeverityText()), r.SeverityNumber())
 	writeMap(b, r.Attributes(), false)
 	b.WriteString(`,"resource":`)
 	writeMap(b, res.Attributes(), true)
 	if schema != "" {
-		fmt.Fprintf(b, `,"schemaUrl":%s`, strconv.Quote(schema))
+		fmt.Fprintf(b, `,"schemaUrl":%s`, jsonQuote(schema))
 	}
-	fmt.Fprintf(b, `,"instrumentationScope":{"name":%s,"version":%s`, strconv.Quote(scope.Name()), strconv.Quote(scope.Version()))
+	fmt.Fprintf(b, `,"instrumentationScope":{"name":%s,"version":%s`, jsonQuote(scope.Name()), jsonQuote(scope.Version()))
 	if schema != "" {
-		fmt.Fprintf(b, `,"schemaUrl":%s`, strconv.Quote(schema))
+		fmt.Fprintf(b, `,"schemaUrl":%s`, jsonQuote(schema))
 	}
 	if scope.Attributes().Len() > 0 {
 		b.WriteString(`,"attributes":`)
@@ -82,10 +83,7 @@ func (m *OpenSearchLogsMarshaler) fmtTS(ts pcommon.Timestamp) string {
 	if ts == 0 {
 		return "null"
 	}
-	if m.UnixTimestamps {
-		return strconv.FormatInt(ts.AsTime().UnixMilli(), 10)
-	}
-	return strconv.Quote(ts.AsTime().Format(time.RFC3339Nano))
+	return jsonQuote(ts.AsTime().Format(time.RFC3339Nano))
 }
 
 func writeMap(b *bytes.Buffer, m pcommon.Map, strVal bool) {
@@ -96,10 +94,10 @@ func writeMap(b *bytes.Buffer, m pcommon.Map, strVal bool) {
 			b.WriteByte(',')
 		}
 		first = false
-		b.WriteString(strconv.Quote(k))
+		b.WriteString(jsonQuote(k))
 		b.WriteByte(':')
 		if strVal {
-			b.WriteString(strconv.Quote(v.AsString()))
+			b.WriteString(jsonQuote(v.AsString()))
 		} else {
 			writeVal(b, v)
 		}
@@ -111,7 +109,7 @@ func writeMap(b *bytes.Buffer, m pcommon.Map, strVal bool) {
 func writeVal(b *bytes.Buffer, v pcommon.Value) {
 	switch v.Type() {
 	case pcommon.ValueTypeStr:
-		b.WriteString(strconv.Quote(v.Str()))
+		b.WriteString(jsonQuote(v.Str()))
 	case pcommon.ValueTypeBool:
 		b.WriteString(strconv.FormatBool(v.Bool()))
 	case pcommon.ValueTypeInt:
@@ -137,3 +135,9 @@ func writeVal(b *bytes.Buffer, v pcommon.Value) {
 }
 
 func (m *OpenSearchLogsMarshaler) Encoding() string { return "opensearch_json" }
+
+// jsonQuote returns s as a JSON-escaped quoted string.
+func jsonQuote(s string) string {
+	b, _ := json.Marshal(s) //nolint:errcheck // json.Marshal on a string cannot fail
+	return string(b)
+}

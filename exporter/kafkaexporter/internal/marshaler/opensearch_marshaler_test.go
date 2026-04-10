@@ -12,76 +12,54 @@ import (
 )
 
 func TestOpenSearchLogsMarshaler(t *testing.T) {
-	tests := []struct {
-		name           string
-		unixTimestamps bool
-	}{
-		{"ISO 8601 timestamps", false},
-		{"Unix milliseconds", true},
-	}
+	marshaler := &OpenSearchLogsMarshaler{}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			marshaler := &OpenSearchLogsMarshaler{
-				unixTimestamps: tt.unixTimestamps,
-			}
+	logs := createTestLogs()
+	messages, err := marshaler.MarshalLogs(logs)
+	require.NoError(t, err)
+	require.NotEmpty(t, messages)
 
-			logs := createTestLogs()
-			messages, err := marshaler.MarshalLogs(logs)
-			require.NoError(t, err)
-			require.NotEmpty(t, messages)
+	var doc map[string]any
+	err = json.Unmarshal(messages[0].Value, &doc)
+	require.NoError(t, err)
 
-			var doc map[string]any
-			err = json.Unmarshal(messages[0].Value, &doc)
-			require.NoError(t, err)
+	// Verify required fields
+	assert.Contains(t, doc, "@timestamp")
+	assert.Contains(t, doc, "body")
+	assert.Contains(t, doc, "severity")
+	assert.Contains(t, doc, "attributes")
+	assert.Contains(t, doc, "resource")
+	assert.Contains(t, doc, "instrumentationScope")
+	assert.Contains(t, doc, "schemaUrl")
 
-			// Verify required fields
-			assert.Contains(t, doc, "@timestamp")
-			assert.Contains(t, doc, "body")
-			assert.Contains(t, doc, "severity")
-			assert.Contains(t, doc, "attributes")
-			assert.Contains(t, doc, "resource")
-			assert.Contains(t, doc, "instrumentationScope")
-			assert.Contains(t, doc, "schemaUrl")
+	// Verify timestamp is an ISO 8601 string
+	_, ok := doc["@timestamp"].(string)
+	assert.True(t, ok, "Expected ISO 8601 timestamp as string")
 
-			// Verify timestamp format
-			timestamp := doc["@timestamp"]
-			if tt.unixTimestamps {
-				_, ok := timestamp.(float64)
-				assert.True(t, ok, "Expected Unix timestamp as number")
-			} else {
-				_, ok := timestamp.(string)
-				assert.True(t, ok, "Expected ISO 8601 timestamp as string")
-			}
+	// Verify content
+	assert.Equal(t, "Test log message", doc["body"])
+	assert.Equal(t, "https://opentelemetry.io/schemas/1.21.0", doc["schemaUrl"])
 
-			// Verify content
-			assert.Equal(t, "Test log message", doc["body"])
-			assert.Equal(t, "https://opentelemetry.io/schemas/1.21.0", doc["schemaUrl"])
+	severity := doc["severity"].(map[string]any)
+	assert.Equal(t, "INFO", severity["text"])
 
-			severity := doc["severity"].(map[string]any)
-			assert.Equal(t, "INFO", severity["text"])
+	resource := doc["resource"].(map[string]any)
+	assert.Equal(t, "test-service", resource["service.name"])
 
-			resource := doc["resource"].(map[string]any)
-			assert.Equal(t, "test-service", resource["service.name"])
+	instrScope := doc["instrumentationScope"].(map[string]any)
+	assert.Equal(t, "test-logger", instrScope["name"])
+	assert.Equal(t, "1.0.0", instrScope["version"])
+	assert.Equal(t, "https://opentelemetry.io/schemas/1.21.0", instrScope["schemaUrl"])
 
-			instrScope := doc["instrumentationScope"].(map[string]any)
-			assert.Equal(t, "test-logger", instrScope["name"])
-			assert.Equal(t, "1.0.0", instrScope["version"])
-			assert.Equal(t, "https://opentelemetry.io/schemas/1.21.0", instrScope["schemaUrl"])
+	scopeAttrs := instrScope["attributes"].(map[string]any)
+	assert.Equal(t, "test-value", scopeAttrs["scope.attr"])
 
-			scopeAttrs := instrScope["attributes"].(map[string]any)
-			assert.Equal(t, "test-value", scopeAttrs["scope.attr"])
-
-			attrs := doc["attributes"].(map[string]any)
-			assert.Equal(t, "12345", attrs["user.id"])
-		})
-	}
+	attrs := doc["attributes"].(map[string]any)
+	assert.Equal(t, "12345", attrs["user.id"])
 }
 
 func TestOpenSearchLogsMarshaler_TraceCorrelation(t *testing.T) {
-	marshaler := &OpenSearchLogsMarshaler{
-		unixTimestamps: false,
-	}
+	marshaler := &OpenSearchLogsMarshaler{}
 
 	logs := createTestLogsWithTraceContext()
 	messages, err := marshaler.MarshalLogs(logs)
@@ -103,9 +81,7 @@ func TestOpenSearchLogsMarshaler_TraceCorrelation(t *testing.T) {
 
 func TestOpenSearchLogsMarshaler_OpenSearchCompatibility(t *testing.T) {
 	// This test verifies that the output is compatible with OpenSearch SS4O schema
-	marshaler := &OpenSearchLogsMarshaler{
-		unixTimestamps: false,
-	}
+	marshaler := &OpenSearchLogsMarshaler{}
 
 	logs := plog.NewLogs()
 	rl := logs.ResourceLogs().AppendEmpty()
@@ -246,9 +222,7 @@ func createTestLogsWithTraceContext() plog.Logs {
 // TestOpenSearchLogsMarshaler_BatchHandling tests the marshaler's ability to handle
 // batches of plog.Logs with various configurations of ResourceLogs, ScopeLogs, and LogRecords.
 func TestOpenSearchLogsMarshaler_BatchHandling(t *testing.T) {
-	marshaler := &OpenSearchLogsMarshaler{
-		unixTimestamps: false,
-	}
+	marshaler := &OpenSearchLogsMarshaler{}
 
 	t.Run("empty logs", func(t *testing.T) {
 		logs := plog.NewLogs()
@@ -762,9 +736,7 @@ func TestOpenSearchLogsMarshaler_BatchHandling(t *testing.T) {
 // TestOpenSearchLogsMarshaler_BatchOrderPreservation verifies that the marshaler
 // preserves the order of log records across resources and scopes.
 func TestOpenSearchLogsMarshaler_BatchOrderPreservation(t *testing.T) {
-	marshaler := &OpenSearchLogsMarshaler{
-		unixTimestamps: false,
-	}
+	marshaler := &OpenSearchLogsMarshaler{}
 
 	logs := plog.NewLogs()
 	baseTime := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)

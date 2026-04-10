@@ -114,7 +114,7 @@ func BenchmarkOpenSearchLogsMarshaler(b *testing.B) {
 }
 
 func BenchmarkOpenSearchLogsMarshaler_UnixTimestamps(b *testing.B) {
-	marshaler := &OpenSearchLogsMarshaler{unixTimestamps: true}
+	marshaler := &OpenSearchLogsMarshaler{}
 	for _, size := range benchmarkSizes {
 		logs := generateLogs(size)
 		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
@@ -141,7 +141,7 @@ func BenchmarkAllLogsMarshalers(b *testing.B) {
 		"PdataJSON":        NewPdataLogsMarshaler(&plog.JSONMarshaler{}),
 		"Raw":              RawLogsMarshaler{},
 		"OpenSearch":       &OpenSearchLogsMarshaler{},
-		"OpenSearchUnixTs": &OpenSearchLogsMarshaler{unixTimestamps: true},
+		"OpenSearchUnixTs": &OpenSearchLogsMarshaler{},
 	}
 
 	for name, marshaler := range marshalers {
@@ -424,7 +424,7 @@ func BenchmarkOpenSearchLogsMarshaler_TimestampFormats(b *testing.B) {
 		})
 
 		b.Run(fmt.Sprintf("ISO8601_size=%d", size), func(b *testing.B) {
-			marshaler := &OpenSearchLogsMarshaler{unixTimestamps: false}
+			marshaler := &OpenSearchLogsMarshaler{}
 			b.ResetTimer()
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
@@ -436,7 +436,7 @@ func BenchmarkOpenSearchLogsMarshaler_TimestampFormats(b *testing.B) {
 		})
 
 		b.Run(fmt.Sprintf("UnixMilli_size=%d", size), func(b *testing.B) {
-			marshaler := &OpenSearchLogsMarshaler{unixTimestamps: true}
+			marshaler := &OpenSearchLogsMarshaler{}
 			b.ResetTimer()
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
