@@ -57,7 +57,7 @@ func (e *opensearchLogExtension) MarshalLogs(ld plog.Logs) ([]byte, error) {
 }
 
 func encodeRecord(b *bytes.Buffer, r plog.LogRecord, res pcommon.Resource, scope pcommon.InstrumentationScope, schemaURL string) {
-	b.WriteString(`{"_source":{"@timestamp":`)
+	b.WriteString(`{"@timestamp":`)
 	writeTimestamp(b, r.Timestamp())
 	b.WriteString(`,"body":`)
 	writeJSONString(b, r.Body().AsString())
@@ -101,7 +101,7 @@ func encodeRecord(b *bytes.Buffer, r plog.LogRecord, res pcommon.Resource, scope
 		b.WriteString(`,"attributes":`)
 		writeMap(b, scope.Attributes(), false)
 	}
-	b.WriteString("}}}")
+	b.WriteString("}}")
 }
 
 func writeTimestamp(b *bytes.Buffer, ts pcommon.Timestamp) {
