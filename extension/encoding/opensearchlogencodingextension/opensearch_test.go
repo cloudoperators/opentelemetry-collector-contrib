@@ -42,8 +42,9 @@ func TestMarshalLogs_BasicSingleRecord(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, result)
 
-	var doc map[string]any
-	require.NoError(t, json.Unmarshal(result, &doc))
+	var wrapper map[string]any
+	require.NoError(t, json.Unmarshal(result, &wrapper))
+	doc := wrapper["_source"].(map[string]any)
 
 	assert.Equal(t, "2024-01-15T10:30:45.123456789Z", doc["@timestamp"])
 	assert.Equal(t, "test log message", doc["body"])
@@ -110,8 +111,9 @@ func TestMarshalLogs_OptionalFieldsOmitted(t *testing.T) {
 	result, err := e.MarshalLogs(logs)
 	require.NoError(t, err)
 
-	var doc map[string]any
-	require.NoError(t, json.Unmarshal(result, &doc))
+	var wrapper map[string]any
+	require.NoError(t, json.Unmarshal(result, &wrapper))
+	doc := wrapper["_source"].(map[string]any)
 
 	_, hasObserved := doc["observedTimestamp"]
 	assert.False(t, hasObserved, "observedTimestamp should be absent")
@@ -160,8 +162,9 @@ func TestMarshalLogs_NDJSONBatch(t *testing.T) {
 
 	// Verify each line is valid JSON and has correct resource
 	for i, line := range lines {
-		var doc map[string]any
-		require.NoError(t, json.Unmarshal(line, &doc), "line %d should be valid JSON", i)
+		var wrapper map[string]any
+		require.NoError(t, json.Unmarshal(line, &wrapper), "line %d should be valid JSON", i)
+		doc := wrapper["_source"].(map[string]any)
 
 		resource := doc["resource"].(map[string]any)
 		if i < 2 {
@@ -201,8 +204,9 @@ func TestMarshalLogs_AttributeTypes(t *testing.T) {
 	result, err := e.MarshalLogs(logs)
 	require.NoError(t, err)
 
-	var doc map[string]any
-	require.NoError(t, json.Unmarshal(result, &doc))
+	var wrapper map[string]any
+	require.NoError(t, json.Unmarshal(result, &wrapper))
+	doc := wrapper["_source"].(map[string]any)
 
 	attrs := doc["attributes"].(map[string]any)
 	assert.Equal(t, "hello", attrs["str"])
@@ -260,8 +264,9 @@ func TestMarshalLogs_BodyTypes(t *testing.T) {
 			result, err := e.MarshalLogs(logs)
 			require.NoError(t, err)
 
-			var doc map[string]any
-			require.NoError(t, json.Unmarshal(result, &doc), "output must be valid JSON")
+			var wrapper map[string]any
+			require.NoError(t, json.Unmarshal(result, &wrapper), "output must be valid JSON")
+			doc := wrapper["_source"].(map[string]any)
 
 			if tt.expected != "" {
 				assert.Equal(t, tt.expected, doc["body"])
@@ -290,8 +295,9 @@ func TestMarshalLogs_JSONEscaping(t *testing.T) {
 	result, err := e.MarshalLogs(logs)
 	require.NoError(t, err)
 
-	var doc map[string]any
-	require.NoError(t, json.Unmarshal(result, &doc), "output with special chars must be valid JSON")
+	var wrapper map[string]any
+	require.NoError(t, json.Unmarshal(result, &wrapper), "output with special chars must be valid JSON")
+	doc := wrapper["_source"].(map[string]any)
 	assert.Equal(t, "line1\nline2\ttab\"quote\\backslash", doc["body"])
 
 	attrs := doc["attributes"].(map[string]any)
