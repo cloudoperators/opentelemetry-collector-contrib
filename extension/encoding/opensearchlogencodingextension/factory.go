@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package opensearchlogencodingextension // import "github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/opensearchlogencodingextension"
+package opensearchlogencodingextension // import "github.com/cloudoperators/opentelemetry-collector-contrib/extension/encoding/opensearchlogencodingextension"
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/extension"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/opensearchlogencodingextension/internal/metadata"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/extension/encoding/opensearchlogencodingextension/internal/metadata"
 )
 
 // NewFactory creates a factory for the OpenSearch log encoding extension.

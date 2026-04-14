@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package opensearchlogencodingextension // import "github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/opensearchlogencodingextension"
+package opensearchlogencodingextension // import "github.com/cloudoperators/opentelemetry-collector-contrib/extension/encoding/opensearchlogencodingextension"
 
 // Config holds configuration for the OpenSearch log encoding extension.
 type Config struct {
