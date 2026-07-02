@@ -77,6 +77,7 @@ func (aud *Auditd) receive(ctx context.Context) {
 			rawEvent, err := aud.client.Receive(false)
 			if err != nil {
 				aud.logger.Error("receive failed", zap.Error(err))
+				continue
 			}
 			// Messages from 1100-2999 are valid audit messages.
 			if rawEvent.Type < auparse.AUDIT_USER_AUTH ||
@@ -86,10 +87,12 @@ func (aud *Auditd) receive(ctx context.Context) {
 			message, err := auparse.Parse(rawEvent.Type, string(rawEvent.Data))
 			if err != nil {
 				aud.logger.Error("parsing failed", zap.Error(err))
+				continue
 			}
 			d, err := message.Data()
 			if err != nil {
 				aud.logger.Error("parsing failed", zap.Error(err))
+				continue
 			}
 			logs := createLogs(message, d)
 			aud.consumer.ConsumeLogs(ctx, logs)
