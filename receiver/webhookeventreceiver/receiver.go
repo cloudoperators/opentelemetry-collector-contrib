@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package webhookeventreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/webhookeventreceiver"
+package webhookeventreceiver // import "github.com/cloudoperators/opentelemetry-collector-contrib/receiver/webhookeventreceiver"
 
 import (
 	"bufio"
@@ -23,7 +23,7 @@ import (
 	"go.opentelemetry.io/collector/receiver/receiverhelper"
 	"go.uber.org/zap"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/webhookeventreceiver/internal/metadata"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/receiver/webhookeventreceiver/internal/metadata"
 )
 
 var (

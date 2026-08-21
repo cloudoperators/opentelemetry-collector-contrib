@@ -22,7 +22,7 @@ import (
 	"go.opentelemetry.io/collector/consumer/consumertest"
 	"go.opentelemetry.io/collector/receiver/receivertest"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/webhookeventreceiver/internal/metadata"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/receiver/webhookeventreceiver/internal/metadata"
 )
 
 func TestCreateNewLogReceiver(t *testing.T) {
