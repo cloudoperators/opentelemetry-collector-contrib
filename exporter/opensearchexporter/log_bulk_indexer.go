@@ -67,6 +67,10 @@ func (lbi *logBulkIndexer) appendRetryLogError(err error, log plog.Logs) {
 	lbi.errs = append(lbi.errs, consumererror.NewLogs(err, log))
 }
 
+func (lbi *logBulkIndexer) appendPermanentLogError(err error, log plog.Logs) {
+	lbi.errs = append(lbi.errs, consumererror.NewLogs(consumererror.NewPermanent(err), log))
+}
+
 func (lbi *logBulkIndexer) submit(ctx context.Context, ld plog.Logs, ir *indexResolver, cfg *Config, timestamp time.Time) {
 	keys := ir.extractPlaceholderKeys(cfg.LogsIndex)
 	timeSuffix := ir.calculateTimeSuffix(cfg.LogsIndexTimeFormat, timestamp)
@@ -157,8 +161,8 @@ func (lbi *logBulkIndexer) processItemFailure(_ context.Context, resp opensearch
 		// Recoverable OpenSearch error
 		lbi.appendRetryLogError(responseAsError(resp), logs)
 	case resp.Status != 0 && itemErr == nil:
-		// Non-recoverable OpenSearch error while indexing document
-		lbi.appendPermanentError(responseAsError(resp))
+		// Non-recoverable OpenSearch error while indexing document — carry record for DLQ routing
+		lbi.appendPermanentLogError(responseAsError(resp), logs)
 	default:
 		// Encoding error. We didn't even attempt to send the event
 		lbi.appendPermanentError(itemErr)
