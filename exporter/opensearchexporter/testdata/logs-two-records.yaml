@@ -1,0 +1,26 @@
+resourceLogs:
+  - resource:
+      attributes:
+        - key: resource.required
+          value:
+            stringValue: foo
+    scopeLogs:
+      - logRecords:
+          - attributes:
+              - key: log.field
+                value:
+                  stringValue: ok-record
+            body:
+              stringValue: This record will succeed
+            spanId: ""
+            timeUnixNano: "1581452773000000789"
+            traceId: ""
+          - attributes:
+              - key: log.field
+                value:
+                  stringValue: bad-record
+            body:
+              stringValue: This record will fail mapping
+            spanId: ""
+            timeUnixNano: "1581452773000000790"
+            traceId: ""

@@ -25,7 +25,13 @@ type logBulkIndexer struct {
 }
 
 func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string) *logBulkIndexer {
-	return &logBulkIndexer{bulkAction: bulkAction, pipeline: pipeline, model: model, errs: nil, bulkIndexer: nil}
+	return &logBulkIndexer{
+		bulkAction:  bulkAction,
+		pipeline:    pipeline,
+		model:       model,
+		errs:        nil,
+		bulkIndexer: nil,
+	}
 }
 
 func (lbi *logBulkIndexer) start(client *opensearchapi.Client) error {
@@ -57,6 +63,10 @@ func (lbi *logBulkIndexer) appendPermanentError(e error) {
 
 func (lbi *logBulkIndexer) appendRetryLogError(err error, log plog.Logs) {
 	lbi.errs = append(lbi.errs, consumererror.NewLogs(err, log))
+}
+
+func (lbi *logBulkIndexer) appendPermanentLogError(err error, log plog.Logs) {
+	lbi.errs = append(lbi.errs, consumererror.NewLogs(consumererror.NewPermanent(err), log))
 }
 
 func (lbi *logBulkIndexer) submit(ctx context.Context, ld plog.Logs, ir *indexResolver, cfg *Config, timestamp time.Time) {
@@ -120,13 +130,30 @@ func makeLog(resource pcommon.Resource, resourceSchemaURL string, scope pcommon.
 }
 
 func (lbi *logBulkIndexer) processItemFailure(resp opensearchapi.BulkRespItem, itemErr error, logs plog.Logs) {
+	// Stamp error attributes before handling
+	if resp.Error != nil && logs.ResourceLogs().Len() > 0 &&
+		logs.ResourceLogs().At(0).ScopeLogs().Len() > 0 &&
+		logs.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().Len() > 0 {
+		lr := logs.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0)
+		if resp.Error.Type != "" {
+			lr.Attributes().PutStr("opensearch.error.type", resp.Error.Type)
+		}
+		if resp.Error.Reason != "" {
+			lr.Attributes().PutStr("opensearch.error.reason", resp.Error.Reason)
+		}
+		if resp.Status != 0 {
+			lr.Attributes().PutInt("opensearch.error.status", int64(resp.Status))
+			lr.Attributes().PutStr("opensearch.error.classification", classify(resp.Status, resp.Error.Type))
+		}
+	}
+
 	switch {
 	case shouldRetryEvent(resp.Status):
 		// Recoverable OpenSearch error
 		lbi.appendRetryLogError(responseAsError(resp), logs)
 	case resp.Status != 0 && itemErr == nil:
-		// Non-recoverable OpenSearch error while indexing document
-		lbi.appendPermanentError(responseAsError(resp))
+		// Non-recoverable OpenSearch error while indexing document — carry record for DLQ routing
+		lbi.appendPermanentLogError(responseAsError(resp), logs)
 	default:
 		// Encoding error. We didn't even attempt to send the event
 		lbi.appendPermanentError(itemErr)
