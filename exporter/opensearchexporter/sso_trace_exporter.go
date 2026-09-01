@@ -63,7 +63,7 @@ func (s *ssoTracesExporter) Start(ctx context.Context, host component.Host) erro
 }
 
 func (s *ssoTracesExporter) pushTraceData(ctx context.Context, td ptrace.Traces) error {
-	indexer := newTraceBulkIndexer(s.bulkAction, s.model, s.config.Pipeline)
+	indexer := newTraceBulkIndexer(s.bulkAction, s.model, s.config.Pipeline, &s.config.ErrorClassification)
 	startErr := indexer.start(s.client)
 	if startErr != nil {
 		return startErr

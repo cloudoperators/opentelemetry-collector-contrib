@@ -17,20 +17,22 @@ import (
 )
 
 type traceBulkIndexer struct {
-	bulkAction  string
-	pipeline    string
-	model       mappingModel
-	errs        []error
-	bulkIndexer opensearchutil.BulkIndexer
+	bulkAction          string
+	pipeline            string
+	model               mappingModel
+	errs                []error
+	bulkIndexer         opensearchutil.BulkIndexer
+	errorClassification *ErrorClassificationConfig
 }
 
-func newTraceBulkIndexer(bulkAction string, model mappingModel, pipeline string) *traceBulkIndexer {
+func newTraceBulkIndexer(bulkAction string, model mappingModel, pipeline string, errorClassification *ErrorClassificationConfig) *traceBulkIndexer {
 	return &traceBulkIndexer{
-		bulkAction:  bulkAction,
-		pipeline:    pipeline,
-		model:       model,
-		errs:        nil,
-		bulkIndexer: nil,
+		bulkAction:          bulkAction,
+		pipeline:            pipeline,
+		model:               model,
+		errs:                nil,
+		bulkIndexer:         nil,
+		errorClassification: errorClassification,
 	}
 }
 
@@ -143,7 +145,7 @@ func (tbi *traceBulkIndexer) processItemFailure(resp opensearchapi.BulkRespItem,
 		}
 		if resp.Status != 0 {
 			span.Attributes().PutInt("opensearch.error.status", int64(resp.Status))
-			span.Attributes().PutStr("opensearch.error.classification", classify(resp.Status, resp.Error.Type))
+			span.Attributes().PutStr("opensearch.error.classification", classify(resp.Status, resp.Error.Type, tbi.errorClassification))
 		}
 	}
 
