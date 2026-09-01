@@ -17,20 +17,22 @@ import (
 )
 
 type logBulkIndexer struct {
-	bulkAction  string
-	pipeline    string
-	model       mappingModel
-	errs        []error
-	bulkIndexer opensearchutil.BulkIndexer
+	bulkAction         string
+	pipeline           string
+	model              mappingModel
+	errs               []error
+	bulkIndexer        opensearchutil.BulkIndexer
+	errorClassification *ErrorClassificationConfig
 }
 
-func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string) *logBulkIndexer {
+func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, errorClassification *ErrorClassificationConfig) *logBulkIndexer {
 	return &logBulkIndexer{
-		bulkAction:  bulkAction,
-		pipeline:    pipeline,
-		model:       model,
-		errs:        nil,
-		bulkIndexer: nil,
+		bulkAction:          bulkAction,
+		pipeline:            pipeline,
+		model:               model,
+		errs:                nil,
+		bulkIndexer:         nil,
+		errorClassification: errorClassification,
 	}
 }
 
@@ -143,7 +145,7 @@ func (lbi *logBulkIndexer) processItemFailure(resp opensearchapi.BulkRespItem, i
 		}
 		if resp.Status != 0 {
 			lr.Attributes().PutInt("opensearch.error.status", int64(resp.Status))
-			lr.Attributes().PutStr("opensearch.error.classification", classify(resp.Status, resp.Error.Type))
+			lr.Attributes().PutStr("opensearch.error.classification", classify(resp.Status, resp.Error.Type, lbi.errorClassification))
 		}
 	}
 
