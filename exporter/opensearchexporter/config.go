@@ -62,6 +62,21 @@ type Config struct {
 	// Pipeline is the optional ID of an ingest pipeline to apply when indexing documents.
 	// https://opensearch.org/docs/latest/ingest-pipelines/
 	Pipeline string `mapstructure:"pipeline"`
+
+	// ErrorClassification defines custom error type classification for DLQ routing.
+	// User-supplied classifications override built-in defaults.
+	ErrorClassification ErrorClassificationConfig `mapstructure:"error_classification"`
+}
+
+// ErrorClassificationConfig allows customizing which OpenSearch error types are permanent vs transient.
+type ErrorClassificationConfig struct {
+	// Permanent lists error types that should be classified as permanent (not retriable).
+	// Examples: mapper_parsing_exception, illegal_argument_exception
+	Permanent []string `mapstructure:"permanent"`
+
+	// Transient lists error types that should be classified as transient (retriable).
+	// Examples: es_rejected_execution_exception, unavailable_shards_exception
+	Transient []string `mapstructure:"transient"`
 }
 
 var (

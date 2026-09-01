@@ -71,7 +71,7 @@ func TestNewTraceBulkIndexerWithPipeline(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tbi := newTraceBulkIndexer("create", nil, tt.pipeline)
+			tbi := newTraceBulkIndexer("create", nil, tt.pipeline, nil)
 			if tbi.pipeline != tt.pipeline {
 				t.Errorf("expected pipeline %q, got %q", tt.pipeline, tbi.pipeline)
 			}

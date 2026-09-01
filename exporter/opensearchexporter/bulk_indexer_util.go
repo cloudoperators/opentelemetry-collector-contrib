@@ -26,8 +26,22 @@ func responseAsError(item opensearchapi.BulkRespItem) error {
 	return errors.New(item.Error.Type + ": " + item.Error.Reason)
 }
 
-func classify(status int, errorType string) string {
-	// Permanent errors by type
+func classify(status int, errorType string, cfg *ErrorClassificationConfig) string {
+	// Check user-supplied overrides first
+	if cfg != nil {
+		for _, t := range cfg.Permanent {
+			if t == errorType {
+				return "permanent"
+			}
+		}
+		for _, t := range cfg.Transient {
+			if t == errorType {
+				return "transient"
+			}
+		}
+	}
+
+	// Built-in permanent errors by type
 	permanentTypes := []string{
 		"mapper_parsing_exception",
 		"document_parsing_exception",
@@ -43,7 +57,7 @@ func classify(status int, errorType string) string {
 		}
 	}
 
-	// Transient errors by type
+	// Built-in transient errors by type
 	transientTypes := []string{
 		"es_rejected_execution_exception",
 		"unavailable_shards_exception",
