@@ -1,0 +1,63 @@
+# OpenTelemetry Collector configuration for replaying DLQ records back to OpenSearch
+# Run as a Kubernetes Job with a unique consumer group ID per replay run
+
+receivers:
+  kafka:
+    brokers:
+      - kafka-broker-1:9092
+      - kafka-broker-2:9092
+      - kafka-broker-3:9092
+    topic: logs-dlq
+    group_id: replay-job-001  # Increment per replay run to reset offset
+    encoding: otlp_proto
+    auth:
+      sasl:
+        mechanism: PLAIN
+        username: ${env:KAFKA_USERNAME}
+        password: ${env:KAFKA_PASSWORD}
+
+processors:
+  # Filter to only replay permanent errors (optional — remove to replay all)
+  filter/permanent_only:
+    logs:
+      log_record:
+        - 'attributes["opensearch.error.classification"] == "permanent"'
+
+  # Strip error attributes before re-indexing
+  attributes/strip_errors:
+    actions:
+      - action: delete
+        key: opensearch.error.type
+      - action: delete
+        key: opensearch.error.reason
+      - action: delete
+        key: opensearch.error.status
+      - action: delete
+        key: opensearch.error.classification
+
+exporters:
+  opensearch:
+    endpoint: https://opensearch-cluster:9200
+    bulk_action: index  # Use 'index' for upsert semantics
+    document_id_from_attribute: opensearch._id  # Idempotent replay
+    logs_index: logs-prod
+    dataset: default
+    namespace: production
+    http:
+      timeout: 30s
+      auth:
+        authenticator: basicauth/opensearch
+
+extensions:
+  basicauth/opensearch:
+    client_auth:
+      username: ${env:OPENSEARCH_USERNAME}
+      password: ${env:OPENSEARCH_PASSWORD}
+
+service:
+  extensions: [basicauth/opensearch]
+  pipelines:
+    logs:
+      receivers: [kafka]
+      processors: [filter/permanent_only, attributes/strip_errors]
+      exporters: [opensearch]
