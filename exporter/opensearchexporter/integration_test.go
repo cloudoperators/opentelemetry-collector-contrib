@@ -192,6 +192,38 @@ func TestOpenSearchLogExporter(t *testing.T) {
 			},
 		},
 		{
+			"Mapping error — failed record stamped, succeeded record not returned",
+			"testdata/logs-two-records.yaml",
+			[]requestHandler{
+				{
+					ValidateReceivedDocuments: func(t *testing.T, _ int, docs []map[string]any) {
+						require.Len(t, docs, 2)
+					},
+					ResponseJSONPath: "testdata/opensearch-response-mapping-error.json",
+				},
+			},
+			func(err error) {
+				// Must be permanent (mapper_parsing_exception)
+				require.True(t, consumererror.IsPermanent(err))
+
+				// Must carry only the failed subset via consumererror.Logs
+				var logsErr consumererror.Logs
+				require.ErrorAs(t, err, &logsErr)
+				failedLogs := logsErr.Data()
+				require.Equal(t, 1, failedLogs.LogRecordCount(), "only the failed record should be returned")
+
+				// Failed record must carry error attributes
+				lr := failedLogs.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0)
+				errType, ok := lr.Attributes().Get("opensearch.error.type")
+				require.True(t, ok)
+				require.Equal(t, "mapper_parsing_exception", errType.AsString())
+
+				classification, ok := lr.Attributes().Get("opensearch.error.classification")
+				require.True(t, ok)
+				require.Equal(t, "permanent", classification.AsString())
+			},
+		},
+		{
 			"Retryable error",
 			"testdata/logs-sample-a.yaml",
 			[]requestHandler{

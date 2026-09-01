@@ -6,9 +6,7 @@ package opensearchexporter // import "github.com/cloudoperators/opentelemetry-co
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"slices"
 	"time"
 
 	"github.com/opensearch-project/opensearch-go/v4/opensearchapi"
@@ -27,7 +25,13 @@ type traceBulkIndexer struct {
 }
 
 func newTraceBulkIndexer(bulkAction string, model mappingModel, pipeline string) *traceBulkIndexer {
-	return &traceBulkIndexer{bulkAction: bulkAction, pipeline: pipeline, model: model, errs: nil, bulkIndexer: nil}
+	return &traceBulkIndexer{
+		bulkAction:  bulkAction,
+		pipeline:    pipeline,
+		model:       model,
+		errs:        nil,
+		bulkIndexer: nil,
+	}
 }
 
 func (tbi *traceBulkIndexer) joinedError() error {
@@ -59,6 +63,10 @@ func (tbi *traceBulkIndexer) appendPermanentError(e error) {
 
 func (tbi *traceBulkIndexer) appendRetryTraceError(err error, trace ptrace.Traces) {
 	tbi.errs = append(tbi.errs, consumererror.NewTraces(err, trace))
+}
+
+func (tbi *traceBulkIndexer) appendPermanentTraceError(err error, trace ptrace.Traces) {
+	tbi.errs = append(tbi.errs, consumererror.NewTraces(consumererror.NewPermanent(err), trace))
 }
 
 func (tbi *traceBulkIndexer) submit(ctx context.Context, td ptrace.Traces, ir *indexResolver, cfg *Config, timestamp time.Time) {
@@ -122,23 +130,34 @@ func makeTrace(resource pcommon.Resource, resourceSchemaURL string, scope pcommo
 }
 
 func (tbi *traceBulkIndexer) processItemFailure(resp opensearchapi.BulkRespItem, itemErr error, traces ptrace.Traces) {
+	// Stamp error attributes before handling
+	if resp.Error != nil && traces.ResourceSpans().Len() > 0 &&
+		traces.ResourceSpans().At(0).ScopeSpans().Len() > 0 &&
+		traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().Len() > 0 {
+		span := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0)
+		if resp.Error.Type != "" {
+			span.Attributes().PutStr("opensearch.error.type", resp.Error.Type)
+		}
+		if resp.Error.Reason != "" {
+			span.Attributes().PutStr("opensearch.error.reason", resp.Error.Reason)
+		}
+		if resp.Status != 0 {
+			span.Attributes().PutInt("opensearch.error.status", int64(resp.Status))
+			span.Attributes().PutStr("opensearch.error.classification", classify(resp.Status, resp.Error.Type))
+		}
+	}
+
 	switch {
 	case shouldRetryEvent(resp.Status):
 		// Recoverable OpenSearch error
 		tbi.appendRetryTraceError(responseAsError(resp), traces)
 	case resp.Status != 0 && itemErr == nil:
-		// Non-recoverable OpenSearch error while indexing document
-		tbi.appendPermanentError(responseAsError(resp))
+		// Non-recoverable OpenSearch error while indexing document — carry record for DLQ routing
+		tbi.appendPermanentTraceError(responseAsError(resp), traces)
 	default:
 		// Encoding error. We didn't even attempt to send the event
 		tbi.appendPermanentError(itemErr)
 	}
-}
-
-// responseAsError converts an opensearchapi.BulkRespItem.Error into an error
-func responseAsError(item opensearchapi.BulkRespItem) error {
-	errorJSON, _ := json.Marshal(item.Error)
-	return errors.New(string(errorJSON))
 }
 
 func attributesToMapString(attributes pcommon.Map) map[string]string {
@@ -147,11 +166,6 @@ func attributesToMapString(attributes pcommon.Map) map[string]string {
 		m[k] = v.AsString()
 	}
 	return m
-}
-
-func shouldRetryEvent(status int) bool {
-	retryOnStatus := []int{500, 502, 503, 504, 429}
-	return slices.Contains(retryOnStatus, status)
 }
 
 func (tbi *traceBulkIndexer) newBulkIndexerItem(document []byte, indexName string) opensearchutil.BulkIndexerItem {
