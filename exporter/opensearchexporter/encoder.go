@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package opensearchexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/opensearchexporter"
+package opensearchexporter // import "github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter"
 
 import (
 	"bytes"
@@ -14,9 +14,9 @@ import (
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/objmodel"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/pool"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/serializer"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/objmodel"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/pool"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/serializer"
 )
 
 var errInvalidTypeForBodyMapMode = errors.New("invalid log record body type for 'bodymap' mapping mode")
@@ -138,7 +138,7 @@ func (m *encodeModel) encodeLogSSO(
 }
 
 // encodeLogDataModel encodes a plog.LogRecord following the Log Data Model.
-// See: https://github.com/open-telemetry/oteps/blob/main/text/logs/0097-log-data-model.md
+// See: https://github.com/cloudoperators/oteps/blob/main/text/logs/0097-log-data-model.md
 func (m *encodeModel) encodeLogDataModel(resource pcommon.Resource, record plog.LogRecord) ([]byte, error) {
 	var document objmodel.Document
 	if m.flattenAttributes {
