@@ -74,9 +74,6 @@ func (lbi *logBulkIndexer) appendRetryLogError(err error, log plog.Logs) {
 	lbi.errs = append(lbi.errs, consumererror.NewLogs(err, log))
 }
 
-func (lbi *logBulkIndexer) appendPermanentLogError(err error, log plog.Logs) {
-	lbi.errs = append(lbi.errs, consumererror.NewLogs(consumererror.NewPermanent(err), log))
-}
 
 func (lbi *logBulkIndexer) submit(ctx context.Context, ld plog.Logs, ir *indexResolver, cfg *Config, timestamp time.Time) {
 	keys := ir.extractPlaceholderKeys(cfg.LogsIndex)
@@ -172,7 +169,7 @@ func (lbi *logBulkIndexer) processItemFailure(_ context.Context, resp opensearch
 		if lbi.dlqIndex != "" {
 			lbi.submitToDLQ(ctx, resp, originalPayload)
 		} else {
-			lbi.appendPermanentLogError(responseAsError(resp), logs)
+			lbi.appendPermanentError(responseAsError(resp))
 		}
 
 	default:
