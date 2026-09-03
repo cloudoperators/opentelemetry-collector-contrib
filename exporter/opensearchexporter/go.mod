@@ -1,4 +1,4 @@
-module github.com/open-telemetry/opentelemetry-collector-contrib/exporter/opensearchexporter
+module github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter
 
 go 1.25.0
 
