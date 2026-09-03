@@ -20,7 +20,7 @@ func shouldRetryEvent(status int) bool {
 }
 
 func responseAsError(item opensearchapi.BulkRespItem) error {
-	if item.Error.Type == "" {
+	if item.Error == nil || item.Error.Type == "" {
 		return errors.New("unknown error")
 	}
 	return errors.New(item.Error.Type + ": " + item.Error.Reason)
