@@ -52,10 +52,7 @@ func TestTraceProcessItemFailure(t *testing.T) {
 			tbi := &traceBulkIndexer{errs: make([]error, tt.initialErrs)}
 			resp := opensearchapi.BulkRespItem{Status: tt.status}
 			traces := ptrace.NewTraces()
-			rs := traces.ResourceSpans().AppendEmpty()
-			ss := rs.ScopeSpans().AppendEmpty()
-			span := ss.Spans().AppendEmpty()
-			tbi.processItemFailure(resp, nil, span, rs.Resource(), rs.SchemaUrl(), ss.Scope(), ss.SchemaUrl())
+			tbi.processItemFailure(resp, nil, traces)
 			if len(tbi.errs) != tt.expectedErrs {
 				t.Errorf("expected %d errors, got %d", tt.expectedErrs, len(tbi.errs))
 			}
@@ -74,7 +71,7 @@ func TestNewTraceBulkIndexerWithPipeline(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tbi := newTraceBulkIndexer("create", nil, tt.pipeline, nil, nil)
+			tbi := newTraceBulkIndexer("create", nil, tt.pipeline)
 			if tbi.pipeline != tt.pipeline {
 				t.Errorf("expected pipeline %q, got %q", tt.pipeline, tbi.pipeline)
 			}
