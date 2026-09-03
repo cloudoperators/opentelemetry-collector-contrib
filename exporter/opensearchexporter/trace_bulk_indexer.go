@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
+	"go.uber.org/zap"
 )
 
 type traceBulkIndexer struct {
@@ -23,9 +24,10 @@ type traceBulkIndexer struct {
 	errs                []error
 	bulkIndexer         opensearchutil.BulkIndexer
 	errorClassification *ErrorClassificationConfig
+	logger              *zap.Logger
 }
 
-func newTraceBulkIndexer(bulkAction string, model mappingModel, pipeline string, errorClassification *ErrorClassificationConfig) *traceBulkIndexer {
+func newTraceBulkIndexer(bulkAction string, model mappingModel, pipeline string, errorClassification *ErrorClassificationConfig, logger *zap.Logger) *traceBulkIndexer {
 	return &traceBulkIndexer{
 		bulkAction:          bulkAction,
 		pipeline:            pipeline,
@@ -33,6 +35,7 @@ func newTraceBulkIndexer(bulkAction string, model mappingModel, pipeline string,
 		errs:                nil,
 		bulkIndexer:         nil,
 		errorClassification: errorClassification,
+		logger:              logger,
 	}
 }
 
@@ -104,7 +107,7 @@ func (tbi *traceBulkIndexer) processItem(ctx context.Context, indexName string, 
 		ItemFailureHandler := func(_ context.Context, _ opensearchutil.BulkIndexerItem, resp opensearchapi.BulkRespItem, itemErr error) {
 			// Setup error handler. The handler handles the per item response status based on the
 			// selective ACKing in the bulk response.
-			tbi.processItemFailure(resp, itemErr, makeTrace(resource, resourceSchemaURL, scope, scopeSchemaURL, span))
+			tbi.processItemFailure(resp, itemErr, span, resource, resourceSchemaURL, scope, scopeSchemaURL)
 		}
 		bi := tbi.newBulkIndexerItem(payload, indexName)
 		bi.OnFailure = ItemFailureHandler
@@ -131,23 +134,31 @@ func makeTrace(resource pcommon.Resource, resourceSchemaURL string, scope pcommo
 	return traces
 }
 
-func (tbi *traceBulkIndexer) processItemFailure(resp opensearchapi.BulkRespItem, itemErr error, traces ptrace.Traces) {
-	// Stamp error attributes before handling
-	if resp.Error != nil && traces.ResourceSpans().Len() > 0 &&
-		traces.ResourceSpans().At(0).ScopeSpans().Len() > 0 &&
-		traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().Len() > 0 {
-		span := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0)
+func (tbi *traceBulkIndexer) processItemFailure(resp opensearchapi.BulkRespItem, itemErr error, originalSpan ptrace.Span, resource pcommon.Resource, resourceSchemaURL string, scope pcommon.InstrumentationScope, scopeSchemaURL string) {
+	if tbi.logger != nil {
+		tbi.logger.Debug("opensearch bulk item failure",
+			zap.Int("status", resp.Status),
+			zap.Any("error", resp.Error),
+			zap.NamedError("item_err", itemErr),
+		)
+	}
+
+	// Stamp error attributes on ORIGINAL span (mutate in place for failover)
+	if resp.Error != nil {
 		if resp.Error.Type != "" {
-			span.Attributes().PutStr("opensearch.error.type", resp.Error.Type)
+			originalSpan.Attributes().PutStr("opensearch.error.type", resp.Error.Type)
 		}
 		if resp.Error.Reason != "" {
-			span.Attributes().PutStr("opensearch.error.reason", resp.Error.Reason)
+			originalSpan.Attributes().PutStr("opensearch.error.reason", resp.Error.Reason)
 		}
 		if resp.Status != 0 {
-			span.Attributes().PutInt("opensearch.error.status", int64(resp.Status))
-			span.Attributes().PutStr("opensearch.error.classification", classify(resp.Status, resp.Error.Type, tbi.errorClassification))
+			originalSpan.Attributes().PutInt("opensearch.error.status", int64(resp.Status))
+			originalSpan.Attributes().PutStr("opensearch.error.classification", classify(resp.Status, resp.Error.Type, tbi.errorClassification))
 		}
 	}
+
+	// Build copy AFTER stamping original so copy also has attrs
+	traces := makeTrace(resource, resourceSchemaURL, scope, scopeSchemaURL, originalSpan)
 
 	switch {
 	case shouldRetryEvent(resp.Status):
