@@ -3,8 +3,8 @@
   "items": [
     {
       "index": {
-        "_id": "dlq1",
-        "_index": "logs-dlq",
+        "_id": "on-error1",
+        "_index": "logs-on-error",
         "_primary_term": 1,
         "_seq_no": 0,
         "_shards": {
