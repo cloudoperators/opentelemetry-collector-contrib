@@ -322,8 +322,10 @@ func TestOpenSearchLogExporterIndexOnError(t *testing.T) {
 			// on error bulk: 1 envelope doc for the failed record
 			require.Len(t, docs, 1)
 			onErrorDocs = docs
-			response, _ := os.ReadFile("testdata/opensearch-response-on-error-success.json")
-			_, _ = w.Write(response)
+			response, err := os.ReadFile("testdata/opensearch-response-on-error-success.json")
+			require.NoError(t, err)
+			_, err = w.Write(response)
+			require.NoError(t, err)
 		default:
 			t.Errorf("unexpected request %d", requestCount)
 		}
