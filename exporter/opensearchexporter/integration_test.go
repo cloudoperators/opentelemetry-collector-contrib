@@ -287,3 +287,83 @@ func validateBulkAction(t *testing.T, expectedIndex string, strMap map[string]an
 	require.True(t, exists)
 	require.Equal(t, expectedIndex, val)
 }
+
+func TestOpenSearchLogExporterIndexOnError(t *testing.T) {
+	requestCount := 0
+	var onErrorDocs []map[string]any
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		decoder := json.NewDecoder(r.Body)
+		var docs []map[string]any
+		for decoder.More() {
+			var line any
+			require.NoError(t, decoder.Decode(&line))
+			obj, ok := line.(map[string]any)
+			if !ok {
+				continue
+			}
+			_, isCreate := obj["create"]
+			_, isIndex := obj["index"]
+			if !isCreate && !isIndex {
+				docs = append(docs, obj)
+			}
+		}
+
+		w.WriteHeader(http.StatusOK)
+		switch requestCount {
+		case 0:
+			// Primary bulk: 2 docs, second fails with mapper_parsing_exception
+			require.Len(t, docs, 2)
+			response, err := os.ReadFile("testdata/opensearch-response-mapping-error.json")
+			require.NoError(t, err)
+			_, err = w.Write(response)
+			require.NoError(t, err)
+		case 1:
+			// on error bulk: 1 envelope doc for the failed record
+			require.Len(t, docs, 1)
+			onErrorDocs = docs
+			response, err := os.ReadFile("testdata/opensearch-response-on-error-success.json")
+			require.NoError(t, err)
+			_, err = w.Write(response)
+			require.NoError(t, err)
+		default:
+			t.Errorf("unexpected request %d", requestCount)
+		}
+		requestCount++
+	}))
+	defer ts.Close()
+
+	cfg := withDefaultConfig(func(config *Config) {
+		config.Endpoint = ts.URL
+		config.TimeoutSettings.Timeout = 0
+		config.LogsIndexOnError = "logs-on-error"
+		config.ErrorClassification = ErrorClassificationConfig{
+			Permanent: []string{"mapper_parsing_exception"},
+		}
+	})
+
+	f := NewFactory()
+	exporter, err := f.CreateLogs(t.Context(), exportertest.NewNopSettings(metadata.Type), cfg)
+	require.NoError(t, err)
+	require.NoError(t, exporter.Start(t.Context(), componenttest.NewNopHost()))
+
+	logs, err := golden.ReadLogs("testdata/logs-two-records.yaml")
+	require.NoError(t, err)
+
+	err = exporter.ConsumeLogs(t.Context(), logs)
+	require.NoError(t, err, "permanent errors routed to on error should not be returned to pipeline")
+
+	require.NoError(t, exporter.Shutdown(t.Context()))
+
+	require.Equal(t, 2, requestCount, "expected primary bulk + on error bulk requests")
+	require.Len(t, onErrorDocs, 1, "one failed record should land in on error")
+
+	onErrorDoc := onErrorDocs[0]
+	errBlock, ok := onErrorDoc["error"].(map[string]any)
+	require.True(t, ok, "on error doc must have error block")
+	require.Equal(t, "mapper_parsing_exception", errBlock["type"])
+	require.Equal(t, "permanent", errBlock["classification"])
+
+	_, hasOriginal := onErrorDoc["original"]
+	require.True(t, hasOriginal, "on error doc must have original field")
+}

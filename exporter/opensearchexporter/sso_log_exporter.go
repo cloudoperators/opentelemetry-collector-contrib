@@ -72,7 +72,7 @@ func (l *logExporter) Start(ctx context.Context, host component.Host) error {
 }
 
 func (l *logExporter) pushLogData(ctx context.Context, ld plog.Logs) error {
-	indexer := newLogBulkIndexer(l.bulkAction, l.model, l.config.Pipeline, &l.config.ErrorClassification)
+	indexer := newLogBulkIndexer(l.bulkAction, l.model, l.config.Pipeline, &l.config.ErrorClassification, l.config.LogsIndexOnError)
 	startErr := indexer.start(l.client)
 	if startErr != nil {
 		return startErr
@@ -82,5 +82,10 @@ func (l *logExporter) pushLogData(ctx context.Context, ld plog.Logs) error {
 	logTimestamp := time.Now() // Replace with actual log timestamp extraction
 	indexer.submit(ctx, ld, l.indexResolver, l.config, logTimestamp)
 	indexer.close(ctx)
+
+	// Flush OnError errors are captured in indexer.errs and returned via joinedError
+	if err := indexer.flushOnErrorIndex(ctx, l.client); err != nil {
+		indexer.appendPermanentError(err)
+	}
 	return indexer.joinedError()
 }
