@@ -52,7 +52,10 @@ func TestProcessItemFailure(t *testing.T) {
 			lbi := &logBulkIndexer{errs: make([]error, tt.initialErrs)}
 			resp := opensearchapi.BulkRespItem{Status: tt.status}
 			logs := plog.NewLogs()
-			lbi.processItemFailure(resp, nil, logs)
+			rs := logs.ResourceLogs().AppendEmpty()
+			ss := rs.ScopeLogs().AppendEmpty()
+			logRecord := ss.LogRecords().AppendEmpty()
+			lbi.processItemFailure(t.Context(), resp, nil, logRecord, nil, rs.Resource(), rs.SchemaUrl(), ss.Scope(), ss.SchemaUrl())
 			if len(lbi.errs) != tt.expectedErrs {
 				t.Errorf("expected %d errors, got %d", tt.expectedErrs, len(lbi.errs))
 			}
@@ -71,7 +74,7 @@ func TestNewLogBulkIndexerWithPipeline(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lbi := newLogBulkIndexer("create", nil, tt.pipeline)
+			lbi := newLogBulkIndexer("create", nil, tt.pipeline, nil)
 			if lbi.pipeline != tt.pipeline {
 				t.Errorf("expected pipeline %q, got %q", tt.pipeline, lbi.pipeline)
 			}

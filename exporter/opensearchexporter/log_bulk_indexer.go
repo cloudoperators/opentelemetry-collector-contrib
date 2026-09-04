@@ -17,15 +17,23 @@ import (
 )
 
 type logBulkIndexer struct {
-	bulkAction  string
-	pipeline    string
-	model       mappingModel
-	errs        []error
-	bulkIndexer opensearchutil.BulkIndexer
+	bulkAction          string
+	pipeline            string
+	model               mappingModel
+	errs                []error
+	bulkIndexer         opensearchutil.BulkIndexer
+	errorClassification *ErrorClassificationConfig
 }
 
-func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string) *logBulkIndexer {
-	return &logBulkIndexer{bulkAction: bulkAction, pipeline: pipeline, model: model, errs: nil, bulkIndexer: nil}
+func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, errorClassification *ErrorClassificationConfig) *logBulkIndexer {
+	return &logBulkIndexer{
+		bulkAction:          bulkAction,
+		pipeline:            pipeline,
+		model:               model,
+		errs:                nil,
+		bulkIndexer:         nil,
+		errorClassification: errorClassification,
+	}
 }
 
 func (lbi *logBulkIndexer) start(client *opensearchapi.Client) error {
@@ -89,10 +97,8 @@ func (lbi *logBulkIndexer) processItem(ctx context.Context, indexName string, re
 	if err != nil {
 		lbi.appendPermanentError(err)
 	} else {
-		ItemFailureHandler := func(_ context.Context, _ opensearchutil.BulkIndexerItem, resp opensearchapi.BulkRespItem, itemErr error) {
-			// Setup error handler. The handler handles the per item response status based on the
-			// selective ACKing in the bulk response.
-			lbi.processItemFailure(resp, itemErr, makeLog(resource, resourceSchemaURL, scope, scopeSchemaURL, logRecord))
+		ItemFailureHandler := func(itemCtx context.Context, _ opensearchutil.BulkIndexerItem, resp opensearchapi.BulkRespItem, itemErr error) {
+			lbi.processItemFailure(itemCtx, resp, itemErr, logRecord, payload, resource, resourceSchemaURL, scope, scopeSchemaURL)
 		}
 		bi := lbi.newBulkIndexerItem(payload, indexName)
 		bi.OnFailure = ItemFailureHandler
@@ -119,7 +125,24 @@ func makeLog(resource pcommon.Resource, resourceSchemaURL string, scope pcommon.
 	return logs
 }
 
-func (lbi *logBulkIndexer) processItemFailure(resp opensearchapi.BulkRespItem, itemErr error, logs plog.Logs) {
+func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensearchapi.BulkRespItem, itemErr error, originalLogRecord plog.LogRecord, originalPayload []byte, resource pcommon.Resource, resourceSchemaURL string, scope pcommon.InstrumentationScope, scopeSchemaURL string) {
+	// Stamp error attributes on ORIGINAL record (mutate in place so failover carries them)
+	if resp.Error != nil {
+		if resp.Error.Type != "" {
+			originalLogRecord.Attributes().PutStr("opensearch.error.type", resp.Error.Type)
+		}
+		if resp.Error.Reason != "" {
+			originalLogRecord.Attributes().PutStr("opensearch.error.reason", resp.Error.Reason)
+		}
+		if resp.Status != 0 {
+			originalLogRecord.Attributes().PutInt("opensearch.error.status", int64(resp.Status))
+			originalLogRecord.Attributes().PutStr("opensearch.error.classification", classifyError(resp.Status, resp.Error.Type, lbi.errorClassification))
+		}
+	}
+
+	// Build copy AFTER stamping original so copy also has attrs
+	logs := makeLog(resource, resourceSchemaURL, scope, scopeSchemaURL, originalLogRecord)
+
 	switch {
 	case shouldRetryEvent(resp.Status):
 		// Recoverable OpenSearch error
