@@ -179,7 +179,7 @@ func (lbi *logBulkIndexer) submitToOnError(_ context.Context, resp opensearchapi
 			"type":           resp.Error.Type,
 			"reason":         resp.Error.Reason,
 			"status":         resp.Status,
-			"classification": classify(resp.Status, resp.Error.Type, lbi.errorClassification),
+			"classification": classifyError(resp.Status, resp.Error.Type, lbi.errorClassification),
 		},
 		"original": json.RawMessage(originalPayload),
 	}
