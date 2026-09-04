@@ -6,9 +6,7 @@ package opensearchexporter // import "github.com/cloudoperators/opentelemetry-co
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"slices"
 	"time"
 
 	"github.com/opensearch-project/opensearch-go/v4/opensearchapi"
@@ -135,10 +133,21 @@ func (tbi *traceBulkIndexer) processItemFailure(resp opensearchapi.BulkRespItem,
 	}
 }
 
-// responseAsError converts an opensearchapi.BulkRespItem.Error into an error
+// FIXME: this is used by both trace and log bulk, so it would make sense to keep it in an agnostic file.
 func responseAsError(item opensearchapi.BulkRespItem) error {
-	errorJSON, _ := json.Marshal(item.Error)
-	return errors.New(string(errorJSON))
+	if item.Error == nil {
+		return errors.New("unknown error")
+	}
+	switch {
+	case item.Error.Type != "" && item.Error.Reason != "":
+		return errors.New(item.Error.Type + ": " + item.Error.Reason)
+	case item.Error.Type != "":
+		return errors.New(item.Error.Type)
+	case item.Error.Reason != "":
+		return errors.New(item.Error.Reason)
+	default:
+		return errors.New("unknown error")
+	}
 }
 
 func attributesToMapString(attributes pcommon.Map) map[string]string {
@@ -149,9 +158,15 @@ func attributesToMapString(attributes pcommon.Map) map[string]string {
 	return m
 }
 
+// FIXME: this is used by both trace and log bulk, so it would make sense to keep it in an agnostic file.
 func shouldRetryEvent(status int) bool {
 	retryOnStatus := []int{500, 502, 503, 504, 429}
-	return slices.Contains(retryOnStatus, status)
+	for _, s := range retryOnStatus {
+		if s == status {
+			return true
+		}
+	}
+	return false
 }
 
 func (tbi *traceBulkIndexer) newBulkIndexerItem(document []byte, indexName string) opensearchutil.BulkIndexerItem {

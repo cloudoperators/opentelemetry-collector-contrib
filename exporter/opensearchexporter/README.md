@@ -187,6 +187,34 @@ Supports standard TLS settings as part of HTTP settings. See [TLS Configuration/
 - `bulk_action` (optional): the [action](https://opensearch.org/docs/2.9/api-reference/document-apis/bulk/) for ingesting data. Only `create` and `index` are allowed here.
 - `pipeline` (optional): the ID of an [ingest pipeline](https://opensearch.org/docs/latest/ingest-pipelines/) to apply when indexing documents. When set, all documents sent via the bulk API will be processed by the specified pipeline before being indexed. The ingest pipeline must exist in the cluster and there must be at least one node with the `ingest` node role assigned.
 
+### Error Classification
+
+When an OpenSearch bulk response reports a per-item failure, the exporter stamps the failing log record with the following attributes so downstream components (routing, filtering, dead-letter pipelines) can act on them:
+
+- `opensearch.error.type` — the OpenSearch error type (e.g. `mapper_parsing_exception`); `unknown` when the response does not include one.
+- `opensearch.error.reason` — the human-readable reason from OpenSearch; `unknown` when the response does not include one.
+- `opensearch.error.status` — the HTTP status returned for the item.
+- `opensearch.error.classification` — either `permanent` or `transient`, indicating whether the failure is worth retrying.
+
+Classification is decided in this order:
+1. User-supplied overrides under `error_classification.permanent` / `error_classification.transient` (matched by error type).
+2. Built-in permanent types: `mapper_parsing_exception`, `document_parsing_exception`, `strict_dynamic_mapping_exception`, `illegal_argument_exception`, `document_missing_exception`, `version_conflict_engine_exception`, `resource_already_exists_exception`.
+3. Built-in transient types: `es_rejected_execution_exception`, `unavailable_shards_exception`, `cluster_block_exception`, `timeout_exception`, `circuit_breaking_exception`.
+4. Fallback to HTTP status: `429`, `500`, `502`, `503`, `504` are transient; everything else is permanent.
+
+Configuration:
+
+```yaml
+exporters:
+  opensearch:
+    error_classification:
+      permanent:
+        - mapper_parsing_exception
+        - strict_dynamic_mapping_exception
+      transient:
+        - es_rejected_execution_exception
+```
+
 ## Example
 
 ```yaml

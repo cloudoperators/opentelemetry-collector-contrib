@@ -4,6 +4,7 @@
 package opensearchexporter
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -125,5 +126,52 @@ func TestMakeTrace(t *testing.T) {
 	}
 	if ss.Spans().Len() != 1 {
 		t.Error("expected 1 span")
+	}
+}
+
+func TestResponseAsError(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{
+			name:    "type and reason set",
+			payload: `{"error":{"type":"mapper_parsing_exception","reason":"bad field"}}`,
+			want:    "mapper_parsing_exception: bad field",
+		},
+		{
+			name:    "only type set",
+			payload: `{"error":{"type":"illegal_argument_exception"}}`,
+			want:    "illegal_argument_exception",
+		},
+		{
+			name:    "only reason set",
+			payload: `{"error":{"reason":"something went wrong"}}`,
+			want:    "something went wrong",
+		},
+		{
+			name:    "empty error object",
+			payload: `{"error":{}}`,
+			want:    "unknown error",
+		},
+		{
+			name:    "no error field",
+			payload: `{}`,
+			want:    "unknown error",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var item opensearchapi.BulkRespItem
+			if err := json.Unmarshal([]byte(tt.payload), &item); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			got := responseAsError(item).Error()
+			if got != tt.want {
+				t.Errorf("responseAsError() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
