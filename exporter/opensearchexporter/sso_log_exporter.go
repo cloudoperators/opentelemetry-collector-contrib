@@ -12,7 +12,6 @@ import (
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/pdata/plog"
-	"go.uber.org/zap"
 
 	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/pool"
 )
@@ -73,7 +72,7 @@ func (l *logExporter) Start(ctx context.Context, host component.Host) error {
 }
 
 func (l *logExporter) pushLogData(ctx context.Context, ld plog.Logs) error {
-	indexer := newLogBulkIndexer(l.bulkAction, l.model, l.config.Pipeline, &l.config.ErrorClassification, l.telemetry.Logger, l.config.LogsDLQIndex)
+	indexer := newLogBulkIndexer(l.bulkAction, l.model, l.config.Pipeline, &l.config.ErrorClassification, l.config.LogsIndexOnError)
 	startErr := indexer.start(l.client)
 	if startErr != nil {
 		return startErr
@@ -84,9 +83,8 @@ func (l *logExporter) pushLogData(ctx context.Context, ld plog.Logs) error {
 	indexer.submit(ctx, ld, l.indexResolver, l.config, logTimestamp)
 	indexer.close(ctx)
 
-	if dlqErr := indexer.flushDLQ(ctx, l.client); dlqErr != nil {
-		l.telemetry.Logger.Error("failed to flush DLQ", zap.Error(dlqErr))
-	}
+	// Flush OnError errors are captured in indexer.errs and returned via joinedError
+	_ = indexer.flushOnErrorIndex(ctx, l.client)
 
 	return indexer.joinedError()
 }

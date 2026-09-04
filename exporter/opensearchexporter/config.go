@@ -48,10 +48,10 @@ type Config struct {
 	LogsIndexFallback   string `mapstructure:"logs_index_fallback"`
 	LogsIndexTimeFormat string `mapstructure:"logs_index_time_format"`
 
-	// LogsDLQIndex is the index to write failed log records to when a permanent indexing error occurs
-	// (e.g. mapper_parsing_exception). If empty, DLQ routing is disabled and permanent errors are
+	// LogsIndexOnError is the index to write failed log records to when a permanent indexing error occurs
+	// (e.g. mapper_parsing_exception). If empty, "on error" routing is disabled and permanent errors are
 	// returned to the pipeline as usual.
-	LogsDLQIndex string `mapstructure:"logs_dlq_index"`
+	LogsIndexOnError string `mapstructure:"logs_index_on_error"`
 
 	// TracesIndex configures the index, index alias, or data stream name traces should be indexed in.
 	// https://opensearch.org/docs/latest/im-plugin/index/
@@ -68,7 +68,7 @@ type Config struct {
 	// https://opensearch.org/docs/latest/ingest-pipelines/
 	Pipeline string `mapstructure:"pipeline"`
 
-	// ErrorClassification defines custom error type classification for DLQ routing.
+	// ErrorClassification defines custom error type classification for "on error" routing.
 	// User-supplied classifications override built-in defaults.
 	ErrorClassification ErrorClassificationConfig `mapstructure:"error_classification"`
 }

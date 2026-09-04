@@ -15,7 +15,6 @@ import (
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
-	"go.uber.org/zap"
 )
 
 type logBulkIndexer struct {
@@ -25,12 +24,11 @@ type logBulkIndexer struct {
 	errs                []error
 	bulkIndexer         opensearchutil.BulkIndexer
 	errorClassification *ErrorClassificationConfig
-	logger              *zap.Logger
-	dlqIndex            string
-	dlqDocs             [][]byte
+	onErrorIndex        string
+	onErrorDocs         [][]byte
 }
 
-func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, errorClassification *ErrorClassificationConfig, logger *zap.Logger, dlqIndex string) *logBulkIndexer {
+func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, errorClassification *ErrorClassificationConfig, onErrorIndex string) *logBulkIndexer {
 	return &logBulkIndexer{
 		bulkAction:          bulkAction,
 		pipeline:            pipeline,
@@ -38,8 +36,7 @@ func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, e
 		errs:                nil,
 		bulkIndexer:         nil,
 		errorClassification: errorClassification,
-		logger:              logger,
-		dlqIndex:            dlqIndex,
+		onErrorIndex:        onErrorIndex,
 	}
 }
 
@@ -73,7 +70,6 @@ func (lbi *logBulkIndexer) appendPermanentError(e error) {
 func (lbi *logBulkIndexer) appendRetryLogError(err error, log plog.Logs) {
 	lbi.errs = append(lbi.errs, consumererror.NewLogs(err, log))
 }
-
 
 func (lbi *logBulkIndexer) submit(ctx context.Context, ld plog.Logs, ir *indexResolver, cfg *Config, timestamp time.Time) {
 	keys := ir.extractPlaceholderKeys(cfg.LogsIndex)
@@ -134,14 +130,6 @@ func makeLog(resource pcommon.Resource, resourceSchemaURL string, scope pcommon.
 }
 
 func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensearchapi.BulkRespItem, itemErr error, originalLogRecord plog.LogRecord, originalPayload []byte, resource pcommon.Resource, resourceSchemaURL string, scope pcommon.InstrumentationScope, scopeSchemaURL string) {
-	if lbi.logger != nil {
-		lbi.logger.Debug("opensearch bulk item failure",
-			zap.Int("status", resp.Status),
-			zap.Any("error", resp.Error),
-			zap.NamedError("item_err", itemErr),
-		)
-	}
-
 	// Stamp error attributes on ORIGINAL record (mutate in place so failover carries them)
 	if resp.Error != nil {
 		if resp.Error.Type != "" {
@@ -164,9 +152,9 @@ func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensear
 		lbi.appendRetryLogError(responseAsError(resp), logs)
 
 	case resp.Status != 0 && itemErr == nil:
-		// Permanent indexing error — route to DLQ index if configured, otherwise return to pipeline
-		if lbi.dlqIndex != "" {
-			lbi.submitToDLQ(ctx, resp, originalPayload)
+		// Permanent indexing error — route to on error index if configured, otherwise return to pipeline
+		if lbi.onErrorIndex != "" {
+			lbi.submitToOnError(ctx, resp, originalPayload)
 		} else {
 			lbi.appendPermanentError(responseAsError(resp))
 		}
@@ -176,7 +164,7 @@ func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensear
 	}
 }
 
-func (lbi *logBulkIndexer) submitToDLQ(_ context.Context, resp opensearchapi.BulkRespItem, originalPayload []byte) {
+func (lbi *logBulkIndexer) submitToOnError(_ context.Context, resp opensearchapi.BulkRespItem, originalPayload []byte) {
 	envelope := map[string]any{
 		"error": map[string]any{
 			"type":           resp.Error.Type,
@@ -188,51 +176,33 @@ func (lbi *logBulkIndexer) submitToDLQ(_ context.Context, resp opensearchapi.Bul
 	}
 	doc, err := json.Marshal(envelope)
 	if err != nil {
-		if lbi.logger != nil {
-			lbi.logger.Error("failed to encode DLQ envelope", zap.Error(err))
-		}
+		lbi.appendPermanentError(err)
 		return
 	}
-	lbi.dlqDocs = append(lbi.dlqDocs, doc)
+	lbi.onErrorDocs = append(lbi.onErrorDocs, doc)
 }
 
-func (lbi *logBulkIndexer) flushDLQ(ctx context.Context, client *opensearchapi.Client) error {
-	if len(lbi.dlqDocs) == 0 {
+func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opensearchapi.Client) error {
+	if len(lbi.onErrorDocs) == 0 {
 		return nil
 	}
-	dlqIndexer, err := newLogOpenSearchBulkIndexer(client, func(_ context.Context, indexerErr error) {
-		if lbi.logger != nil {
-			lbi.logger.Error("DLQ bulk indexer error", zap.Error(indexerErr))
-		}
-	}, lbi.pipeline)
+	onErrorIndexer, err := newLogOpenSearchBulkIndexer(client, lbi.onIndexerError, lbi.pipeline)
 	if err != nil {
 		return err
 	}
-	for _, doc := range lbi.dlqDocs {
+	for _, doc := range lbi.onErrorDocs {
 		doc := doc
 		item := opensearchutil.BulkIndexerItem{
 			Action: "index",
-			Index:  lbi.dlqIndex,
+			Index:  lbi.onErrorIndex,
 			Body:   bytes.NewReader(doc),
-			OnFailure: func(_ context.Context, _ opensearchutil.BulkIndexerItem, r opensearchapi.BulkRespItem, e error) {
-				if lbi.logger != nil {
-					lbi.logger.Error("failed to write to DLQ index",
-						zap.Int("status", r.Status),
-						zap.Any("error", r.Error),
-						zap.NamedError("err", e),
-					)
-				}
-			},
 		}
-		if addErr := dlqIndexer.Add(ctx, item); addErr != nil {
-			if lbi.logger != nil {
-				lbi.logger.Error("failed to add item to DLQ bulk indexer", zap.Error(addErr))
-			}
+		if addErr := onErrorIndexer.Add(ctx, item); addErr != nil {
+			lbi.appendPermanentError(addErr)
 		}
 	}
-	return dlqIndexer.Close(ctx)
+	return onErrorIndexer.Close(ctx)
 }
-
 
 func (lbi *logBulkIndexer) newBulkIndexerItem(document []byte, indexName string) opensearchutil.BulkIndexerItem {
 	body := bytes.NewReader(document)
