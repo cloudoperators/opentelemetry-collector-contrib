@@ -140,7 +140,7 @@ func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensear
 		}
 		if resp.Status != 0 {
 			originalLogRecord.Attributes().PutInt("opensearch.error.status", int64(resp.Status))
-			originalLogRecord.Attributes().PutStr("opensearch.error.classification", classify(resp.Status, resp.Error.Type, lbi.errorClassification))
+			originalLogRecord.Attributes().PutStr("opensearch.error.classification", classifyError(resp.Status, resp.Error.Type, lbi.errorClassification))
 		}
 	}
 
@@ -170,7 +170,7 @@ func (lbi *logBulkIndexer) submitToOnError(_ context.Context, resp opensearchapi
 			"type":           resp.Error.Type,
 			"reason":         resp.Error.Reason,
 			"status":         resp.Status,
-			"classification": classify(resp.Status, resp.Error.Type, lbi.errorClassification),
+			"classification": classifyError(resp.Status, resp.Error.Type, lbi.errorClassification),
 		},
 		"original": json.RawMessage(originalPayload),
 	}

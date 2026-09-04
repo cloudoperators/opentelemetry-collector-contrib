@@ -133,12 +133,31 @@ func (tbi *traceBulkIndexer) processItemFailure(resp opensearchapi.BulkRespItem,
 	}
 }
 
+// FIXME: this is used by both trace and log bulk, so it would make sense to keep it in an agnostig file.
+func responseAsError(item opensearchapi.BulkRespItem) error {
+	if item.Error == nil || item.Error.Type == "" {
+		return errors.New("unknown error")
+	}
+	return errors.New(item.Error.Type + ": " + item.Error.Reason)
+}
+
 func attributesToMapString(attributes pcommon.Map) map[string]string {
 	m := make(map[string]string, attributes.Len())
 	for k, v := range attributes.All() {
 		m[k] = v.AsString()
 	}
 	return m
+}
+
+// FIXME: this is used by both trace and log bulk, so it would make sense to keep it in an agnostig file.
+func shouldRetryEvent(status int) bool {
+	retryOnStatus := []int{500, 502, 503, 504, 429}
+	for _, s := range retryOnStatus {
+		if s == status {
+			return true
+		}
+	}
+	return false
 }
 
 func (tbi *traceBulkIndexer) newBulkIndexerItem(document []byte, indexName string) opensearchutil.BulkIndexerItem {

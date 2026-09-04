@@ -3,30 +3,7 @@
 
 package opensearchexporter // import "github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter"
 
-import (
-	"errors"
-
-	"github.com/opensearch-project/opensearch-go/v4/opensearchapi"
-)
-
-func shouldRetryEvent(status int) bool {
-	retryOnStatus := []int{500, 502, 503, 504, 429}
-	for _, s := range retryOnStatus {
-		if s == status {
-			return true
-		}
-	}
-	return false
-}
-
-func responseAsError(item opensearchapi.BulkRespItem) error {
-	if item.Error == nil || item.Error.Type == "" {
-		return errors.New("unknown error")
-	}
-	return errors.New(item.Error.Type + ": " + item.Error.Reason)
-}
-
-func classify(status int, errorType string, cfg *ErrorClassificationConfig) string {
+func classifyError(status int, errorType string, cfg *ErrorClassificationConfig) string {
 	// Check user-supplied overrides first
 	if cfg != nil {
 		for _, t := range cfg.Permanent {
@@ -41,7 +18,7 @@ func classify(status int, errorType string, cfg *ErrorClassificationConfig) stri
 		}
 	}
 
-	// Built-in permanent errors by type
+	// If no configured list of permanent errors are provided, we define a opinionated default set of exceptions.
 	permanentTypes := []string{
 		"mapper_parsing_exception",
 		"document_parsing_exception",
@@ -57,7 +34,7 @@ func classify(status int, errorType string, cfg *ErrorClassificationConfig) stri
 		}
 	}
 
-	// Built-in transient errors by type
+	// If no configured list of transient errors are provided, we define a opinionated default set of exceptions.
 	transientTypes := []string{
 		"es_rejected_execution_exception",
 		"unavailable_shards_exception",
