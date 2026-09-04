@@ -18,7 +18,7 @@ func classifyError(status int, errorType string, cfg *ErrorClassificationConfig)
 		}
 	}
 
-	// If no configured list of permanent errors are provided, we define a opinionated default set of exceptions.
+	// Built-in default set of permanent exceptions (user overrides above take precedence).
 	permanentTypes := []string{
 		"mapper_parsing_exception",
 		"document_parsing_exception",

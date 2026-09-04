@@ -125,7 +125,7 @@ func makeLog(resource pcommon.Resource, resourceSchemaURL string, scope pcommon.
 	return logs
 }
 
-func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensearchapi.BulkRespItem, itemErr error, originalLogRecord plog.LogRecord, originalPayload []byte, resource pcommon.Resource, resourceSchemaURL string, scope pcommon.InstrumentationScope, scopeSchemaURL string) {
+func (lbi *logBulkIndexer) processItemFailure(_ context.Context, resp opensearchapi.BulkRespItem, itemErr error, originalLogRecord plog.LogRecord, _ []byte, resource pcommon.Resource, resourceSchemaURL string, scope pcommon.InstrumentationScope, scopeSchemaURL string) {
 	// Stamp error attributes on ORIGINAL record (mutate in place so failover carries them)
 	if resp.Error != nil {
 		if resp.Error.Type != "" {

@@ -133,7 +133,7 @@ func (tbi *traceBulkIndexer) processItemFailure(resp opensearchapi.BulkRespItem,
 	}
 }
 
-// FIXME: this is used by both trace and log bulk, so it would make sense to keep it in an agnostig file.
+// FIXME: this is used by both trace and log bulk, so it would make sense to keep it in an agnostic file.
 func responseAsError(item opensearchapi.BulkRespItem) error {
 	if item.Error == nil || item.Error.Type == "" {
 		return errors.New("unknown error")
