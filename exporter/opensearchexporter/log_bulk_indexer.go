@@ -156,8 +156,11 @@ func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensear
 	// Build copy AFTER stamping original so copy also has attrs
 	logs := makeLog(resource, resourceSchemaURL, scope, scopeSchemaURL, originalLogRecord)
 
+	classification := classifyError(resp.Status, errType, lbi.errorClassification)
+
 	switch {
-	case shouldRetryEvent(resp.Status):
+	case classification == "transient":
+		// Retryable per HTTP status or user/built-in classification override.
 		lbi.appendRetryLogError(responseAsError(resp), logs)
 
 	case resp.Status != 0 && itemErr == nil:
