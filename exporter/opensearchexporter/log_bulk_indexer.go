@@ -206,6 +206,13 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 			Index:  lbi.onErrorIndex,
 			Body:   bytes.NewReader(doc),
 		}
+		item.OnFailure = func(_ context.Context, _ opensearchutil.BulkIndexerItem, resp opensearchapi.BulkRespItem, itemErr error) {
+			if itemErr != nil {
+				lbi.appendPermanentError(itemErr)
+				return
+			}
+			lbi.appendPermanentError(responseAsError(resp))
+		}
 		if addErr := onErrorIndexer.Add(ctx, item); addErr != nil {
 			lbi.appendPermanentError(addErr)
 		}

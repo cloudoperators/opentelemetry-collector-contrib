@@ -314,8 +314,10 @@ func TestOpenSearchLogExporterIndexOnError(t *testing.T) {
 		case 0:
 			// Primary bulk: 2 docs, second fails with mapper_parsing_exception
 			require.Len(t, docs, 2)
-			response, _ := os.ReadFile("testdata/opensearch-response-mapping-error.json")
-			_, _ = w.Write(response)
+			response, err := os.ReadFile("testdata/opensearch-response-mapping-error.json")
+			require.NoError(t, err)
+			_, err = w.Write(response)
+			require.NoError(t, err)
 		case 1:
 			// on error bulk: 1 envelope doc for the failed record
 			require.Len(t, docs, 1)

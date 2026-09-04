@@ -84,7 +84,8 @@ func (l *logExporter) pushLogData(ctx context.Context, ld plog.Logs) error {
 	indexer.close(ctx)
 
 	// Flush OnError errors are captured in indexer.errs and returned via joinedError
-	_ = indexer.flushOnErrorIndex(ctx, l.client)
-
+	if err := indexer.flushOnErrorIndex(ctx, l.client); err != nil {
+		indexer.appendPermanentError(err)
+	}
 	return indexer.joinedError()
 }
