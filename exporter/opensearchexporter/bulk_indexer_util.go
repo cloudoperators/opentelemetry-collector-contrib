@@ -34,7 +34,7 @@ func classifyError(status int, errorType string, cfg *ErrorClassificationConfig)
 		}
 	}
 
-	// If no configured list of transient errors are provided, we define a opinionated default set of exceptions.
+	// Built-in default set of permanent exceptions (user overrides above take precedence).
 	transientTypes := []string{
 		"es_rejected_execution_exception",
 		"unavailable_shards_exception",

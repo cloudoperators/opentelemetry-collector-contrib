@@ -135,10 +135,19 @@ func (tbi *traceBulkIndexer) processItemFailure(resp opensearchapi.BulkRespItem,
 
 // FIXME: this is used by both trace and log bulk, so it would make sense to keep it in an agnostic file.
 func responseAsError(item opensearchapi.BulkRespItem) error {
-	if item.Error == nil || item.Error.Type == "" {
+	if item.Error == nil {
 		return errors.New("unknown error")
 	}
-	return errors.New(item.Error.Type + ": " + item.Error.Reason)
+	switch {
+	case item.Error.Type != "" && item.Error.Reason != "":
+		return errors.New(item.Error.Type + ": " + item.Error.Reason)
+	case item.Error.Type != "":
+		return errors.New(item.Error.Type)
+	case item.Error.Reason != "":
+		return errors.New(item.Error.Reason)
+	default:
+		return errors.New("unknown error")
+	}
 }
 
 func attributesToMapString(attributes pcommon.Map) map[string]string {
@@ -149,7 +158,7 @@ func attributesToMapString(attributes pcommon.Map) map[string]string {
 	return m
 }
 
-// FIXME: this is used by both trace and log bulk, so it would make sense to keep it in an agnostig file.
+// FIXME: this is used by both trace and log bulk, so it would make sense to keep it in an agnostic file.
 func shouldRetryEvent(status int) bool {
 	retryOnStatus := []int{500, 502, 503, 504, 429}
 	for _, s := range retryOnStatus {
