@@ -126,18 +126,27 @@ func makeLog(resource pcommon.Resource, resourceSchemaURL string, scope pcommon.
 }
 
 func (lbi *logBulkIndexer) processItemFailure(_ context.Context, resp opensearchapi.BulkRespItem, itemErr error, originalLogRecord plog.LogRecord, _ []byte, resource pcommon.Resource, resourceSchemaURL string, scope pcommon.InstrumentationScope, scopeSchemaURL string) {
-	// Stamp error attributes on ORIGINAL record (mutate in place so failover carries them)
+	// Stamp error attributes on ORIGINAL record (mutate in place so downstream consumers can act on them).
+	// resp.Error may be nil when OpenSearch reports only a status (e.g. transport-level failures surfaced
+	// via itemErr), so we default type/reason to "unknown" and always stamp status + classification when a
+	// status is present.
+	errType := "unknown"
+	errReason := "unknown"
 	if resp.Error != nil {
 		if resp.Error.Type != "" {
-			originalLogRecord.Attributes().PutStr("opensearch.error.type", resp.Error.Type)
+			errType = resp.Error.Type
 		}
 		if resp.Error.Reason != "" {
-			originalLogRecord.Attributes().PutStr("opensearch.error.reason", resp.Error.Reason)
+			errReason = resp.Error.Reason
 		}
+	}
+	if resp.Status != 0 || resp.Error != nil {
+		originalLogRecord.Attributes().PutStr("opensearch.error.type", errType)
+		originalLogRecord.Attributes().PutStr("opensearch.error.reason", errReason)
 		if resp.Status != 0 {
 			originalLogRecord.Attributes().PutInt("opensearch.error.status", int64(resp.Status))
-			originalLogRecord.Attributes().PutStr("opensearch.error.classification", classifyError(resp.Status, resp.Error.Type, lbi.errorClassification))
 		}
+		originalLogRecord.Attributes().PutStr("opensearch.error.classification", classifyError(resp.Status, errType, lbi.errorClassification))
 	}
 
 	// Build copy AFTER stamping original so copy also has attrs

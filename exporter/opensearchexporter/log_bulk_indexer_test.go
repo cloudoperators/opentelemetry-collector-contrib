@@ -119,8 +119,17 @@ func TestProcessItemFailureStampsAttributes(t *testing.T) {
 			expectAttrsSet:       true,
 		},
 		{
-			name:           "no resp.Error stamps nothing",
-			status:         500,
+			name:                 "status without resp.Error stamps unknown fields",
+			status:               500,
+			expectType:           "unknown",
+			expectReason:         "unknown",
+			expectStatus:         500,
+			expectClassification: "transient",
+			expectAttrsSet:       true,
+		},
+		{
+			name:           "no status and no resp.Error stamps nothing",
+			status:         0,
 			expectAttrsSet: false,
 		},
 	}

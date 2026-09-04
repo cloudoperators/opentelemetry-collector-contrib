@@ -1,4 +1,18 @@
 $defs:
+  error_classification_config:
+    description: 'ErrorClassificationConfig allows customizing which OpenSearch error types are permanent vs transient.'
+    type: object
+    properties:
+      permanent:
+        description: 'Permanent lists error types that should be classified as permanent (not retriable). Examples: mapper_parsing_exception, illegal_argument_exception.'
+        type: array
+        items:
+          type: string
+      transient:
+        description: 'Transient lists error types that should be classified as transient (retriable). Examples: es_rejected_execution_exception, unavailable_shards_exception.'
+        type: array
+        items:
+          type: string
   mappings_settings:
     type: object
     properties:
@@ -33,6 +47,9 @@ properties:
   dataset:
     description: The Observability indices would follow the recommended for immutable data stream ingestion pattern using the data_stream concepts. See https://opensearch.org/docs/latest/dashboards/im-dashboards/datastream/ Index pattern will follow the next naming template ss4o_{type}-{dataset}-{namespace}
     type: string
+  error_classification:
+    description: 'ErrorClassification defines custom error type classification. User-supplied classifications override built-in defaults and control the value stamped on failed records as opensearch.error.classification.'
+    $ref: error_classification_config
   logs_index:
     description: LogsIndex configures the index, index alias, or data stream name logs should be indexed in. https://opensearch.org/docs/latest/im-plugin/index/ https://opensearch.org/docs/latest/dashboards/im-dashboards/datastream/
     type: string
