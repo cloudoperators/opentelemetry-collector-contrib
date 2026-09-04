@@ -288,9 +288,9 @@ func validateBulkAction(t *testing.T, expectedIndex string, strMap map[string]an
 	require.Equal(t, expectedIndex, val)
 }
 
-func TestOpenSearchLogExporterDLQIndex(t *testing.T) {
+func TestOpenSearchLogExporterIndexOnError(t *testing.T) {
 	requestCount := 0
-	var dlqDocs []map[string]any
+	var onErrorDocs []map[string]any
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		decoder := json.NewDecoder(r.Body)
@@ -317,10 +317,10 @@ func TestOpenSearchLogExporterDLQIndex(t *testing.T) {
 			response, _ := os.ReadFile("testdata/opensearch-response-mapping-error.json")
 			_, _ = w.Write(response)
 		case 1:
-			// DLQ bulk: 1 envelope doc for the failed record
+			// on error bulk: 1 envelope doc for the failed record
 			require.Len(t, docs, 1)
-			dlqDocs = docs
-			response, _ := os.ReadFile("testdata/opensearch-response-dlq-success.json")
+			onErrorDocs = docs
+			response, _ := os.ReadFile("testdata/opensearch-response-on-error-success.json")
 			_, _ = w.Write(response)
 		default:
 			t.Errorf("unexpected request %d", requestCount)
@@ -332,7 +332,7 @@ func TestOpenSearchLogExporterDLQIndex(t *testing.T) {
 	cfg := withDefaultConfig(func(config *Config) {
 		config.Endpoint = ts.URL
 		config.TimeoutSettings.Timeout = 0
-		config.LogsDLQIndex = "logs-dlq"
+		config.LogsIndexOnError = "logs-on-error"
 		config.ErrorClassification = ErrorClassificationConfig{
 			Permanent: []string{"mapper_parsing_exception"},
 		}
@@ -347,19 +347,19 @@ func TestOpenSearchLogExporterDLQIndex(t *testing.T) {
 	require.NoError(t, err)
 
 	err = exporter.ConsumeLogs(t.Context(), logs)
-	require.NoError(t, err, "permanent errors routed to DLQ should not be returned to pipeline")
+	require.NoError(t, err, "permanent errors routed to on error should not be returned to pipeline")
 
 	require.NoError(t, exporter.Shutdown(t.Context()))
 
-	require.Equal(t, 2, requestCount, "expected primary bulk + DLQ bulk requests")
-	require.Len(t, dlqDocs, 1, "one failed record should land in DLQ")
+	require.Equal(t, 2, requestCount, "expected primary bulk + on error bulk requests")
+	require.Len(t, onErrorDocs, 1, "one failed record should land in on error")
 
-	dlqDoc := dlqDocs[0]
-	errBlock, ok := dlqDoc["error"].(map[string]any)
-	require.True(t, ok, "DLQ doc must have error block")
+	onErrorDoc := onErrorDocs[0]
+	errBlock, ok := onErrorDoc["error"].(map[string]any)
+	require.True(t, ok, "on error doc must have error block")
 	require.Equal(t, "mapper_parsing_exception", errBlock["type"])
 	require.Equal(t, "permanent", errBlock["classification"])
 
-	_, hasOriginal := dlqDoc["original"]
-	require.True(t, hasOriginal, "DLQ doc must have original field")
+	_, hasOriginal := onErrorDoc["original"]
+	require.True(t, hasOriginal, "on error doc must have original field")
 }
