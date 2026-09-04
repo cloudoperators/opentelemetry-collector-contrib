@@ -129,7 +129,7 @@ func makeLog(resource pcommon.Resource, resourceSchemaURL string, scope pcommon.
 	return logs
 }
 
-func (lbi *logBulkIndexer) processItemFailure(_ context.Context, resp opensearchapi.BulkRespItem, itemErr error, originalLogRecord plog.LogRecord, _ []byte, resource pcommon.Resource, resourceSchemaURL string, scope pcommon.InstrumentationScope, scopeSchemaURL string) {
+func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensearchapi.BulkRespItem, itemErr error, originalLogRecord plog.LogRecord, originalPayload []byte, resource pcommon.Resource, resourceSchemaURL string, scope pcommon.InstrumentationScope, scopeSchemaURL string) {
 	// Stamp error attributes on ORIGINAL record (mutate in place so downstream consumers can act on them).
 	// resp.Error may be nil when OpenSearch reports only a status (e.g. transport-level failures surfaced
 	// via itemErr), so we default type/reason to "unknown" and always stamp status + classification when a
