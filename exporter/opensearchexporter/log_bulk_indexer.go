@@ -174,12 +174,22 @@ func (lbi *logBulkIndexer) processItemFailure(_ context.Context, resp opensearch
 }
 
 func (lbi *logBulkIndexer) submitToOnError(_ context.Context, resp opensearchapi.BulkRespItem, originalPayload []byte) {
+	errType := "unknown"
+	errReason := "unknown"
+	if resp.Error != nil {
+		if resp.Error.Type != "" {
+			errType = resp.Error.Type
+		}
+		if resp.Error.Reason != "" {
+			errReason = resp.Error.Reason
+		}
+	}
 	envelope := map[string]any{
 		"error": map[string]any{
-			"type":           resp.Error.Type,
-			"reason":         resp.Error.Reason,
+			"type":           errType,
+			"reason":         errReason,
 			"status":         resp.Status,
-			"classification": classifyError(resp.Status, resp.Error.Type, lbi.errorClassification),
+			"classification": classifyError(resp.Status, errType, lbi.errorClassification),
 		},
 		"original": json.RawMessage(originalPayload),
 	}
