@@ -337,7 +337,7 @@ func TestOpenSearchLogExporterIndexOnError(t *testing.T) {
 		config.Endpoint = ts.URL
 		config.TimeoutSettings.Timeout = 0
 		config.LogsIndexOnError = "logs-on-error"
-		config.ErrorClassification = ErrorClassificationConfig{
+		config.ErrorClass = ErrorClassConfig{
 			Permanent: []string{"mapper_parsing_exception"},
 		}
 	})
@@ -362,7 +362,7 @@ func TestOpenSearchLogExporterIndexOnError(t *testing.T) {
 	errBlock, ok := onErrorDoc["error"].(map[string]any)
 	require.True(t, ok, "on error doc must have error block")
 	require.Equal(t, "mapper_parsing_exception", errBlock["type"])
-	require.Equal(t, "permanent", errBlock["classification"])
+	require.Equal(t, "permanent", errBlock["class"])
 
 	_, hasOriginal := onErrorDoc["original"]
 	require.True(t, hasOriginal, "on error doc must have original field")

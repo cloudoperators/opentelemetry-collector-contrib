@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/opensearch-project/opensearch-go/v4/opensearchapi"
@@ -24,12 +25,12 @@ type logBulkIndexer struct {
 	model               mappingModel
 	errs                []error
 	bulkIndexer         opensearchutil.BulkIndexer
-	errorClassification *ErrorClassificationConfig
+	errorClassification *ErrorClassConfig
 	onErrorIndex        string
 	onErrorDocs         [][]byte
 }
 
-func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, errorClassification *ErrorClassificationConfig, onErrorIndex string) *logBulkIndexer {
+func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, errorClassification *ErrorClassConfig, onErrorIndex string) *logBulkIndexer {
 	return &logBulkIndexer{
 		bulkAction:          bulkAction,
 		pipeline:            pipeline,
@@ -131,11 +132,11 @@ func makeLog(resource pcommon.Resource, resourceSchemaURL string, scope pcommon.
 }
 
 func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensearchapi.BulkRespItem, itemErr error, originalLogRecord plog.LogRecord, originalPayload []byte, resource pcommon.Resource, resourceSchemaURL string, scope pcommon.InstrumentationScope, scopeSchemaURL string) {
-	logs, classification := lbi.formatItemError(resp, originalLogRecord, originalPayload, resource, resourceSchemaURL, scope, scopeSchemaURL)
+	logs, class := lbi.formatItemError(resp, originalLogRecord, resource, resourceSchemaURL, scope, scopeSchemaURL)
 
 	switch {
-	case classification == "transient":
-		// Retryable per HTTP status or user/built-in classification override.
+	case class == "transient":
+		// Retryable per HTTP status or user/built-in class override.
 		lbi.appendRetryLogError(responseAsError(resp), logs)
 
 	case resp.Status != 0 && itemErr == nil:
@@ -151,10 +152,10 @@ func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensear
 	}
 }
 
-func (lbi *logBulkIndexer) formatItemError(resp opensearchapi.BulkRespItem, originalLogRecord plog.LogRecord, originalPayload []byte, resource pcommon.Resource, resourceSchemaURL string, scope pcommon.InstrumentationScope, scopeSchemaURL string) (plog.Logs, string) {
+func (lbi *logBulkIndexer) formatItemError(resp opensearchapi.BulkRespItem, originalLogRecord plog.LogRecord, resource pcommon.Resource, resourceSchemaURL string, scope pcommon.InstrumentationScope, scopeSchemaURL string) (plog.Logs, string) {
 	// Stamp error attributes on ORIGINAL record (mutate in place so downstream consumers can act on them).
 	// resp.Error may be nil when OpenSearch reports only a status (e.g. transport-level failures surfaced
-	// via itemErr), so we default type/reason to "unknown" and always stamp status + classification when a
+	// via itemErr), so we default type/reason to "unknown" and always stamp status + class when a
 	// status is present.
 	errType := "unknown"
 	errReason := "unknown"
@@ -163,7 +164,7 @@ func (lbi *logBulkIndexer) formatItemError(resp opensearchapi.BulkRespItem, orig
 			errType = resp.Error.Type
 		}
 		if resp.Error.Reason != "" {
-			errReason = resp.Error.Reason
+			errReason = trimReasonPreview(resp.Error.Reason)
 		}
 	}
 	if resp.Status != 0 || resp.Error != nil {
@@ -172,21 +173,21 @@ func (lbi *logBulkIndexer) formatItemError(resp opensearchapi.BulkRespItem, orig
 		if resp.Status != 0 {
 			originalLogRecord.Attributes().PutInt("opensearch.error.status", int64(resp.Status))
 		}
-		originalLogRecord.Attributes().PutStr("opensearch.error.classification", classifyError(resp.Status, errType, lbi.errorClassification))
-		stampOriginalLogChunks(originalLogRecord, originalPayload)
+		originalLogRecord.Attributes().PutStr("opensearch.error.class", classifyError(resp.Status, errType, lbi.errorClassification))
 	}
 
 	return makeLog(resource, resourceSchemaURL, scope, scopeSchemaURL, originalLogRecord), classifyError(resp.Status, errType, lbi.errorClassification)
-
 }
 
-// luceneMaxFieldBytes is the Lucene UTF-8 field length limit.
-const luceneMaxFieldBytes = 32766
+// luceneMaxFieldBytes is a safe chunk size that stays under the 32766-byte Lucene keyword limit
+// even when the payload contains multi-byte UTF-8 sequences.
+const luceneMaxFieldBytes = 32000
 
-// stampOriginalLogChunks stores the already-encoded payload as opensearch.error.original_log
-// (and opensearch.error.original_log_1, _2, … when the payload exceeds the Lucene limit).
-func stampOriginalLogChunks(record plog.LogRecord, payload []byte) {
-	baseKey := "opensearch.error.original_log"
+// originalLogChunks splits the payload into strings that each fit within the Lucene field limit,
+// keyed as original_log, original_log_1, original_log_2, … for the on-error index envelope.
+func originalLogChunks(payload []byte) map[string]string {
+	chunks := map[string]string{}
+	baseKey := "original_log"
 	for i, start := 0, 0; start < len(payload); i, start = i+1, start+luceneMaxFieldBytes {
 		end := start + luceneMaxFieldBytes
 		if end > len(payload) {
@@ -196,8 +197,19 @@ func stampOriginalLogChunks(record plog.LogRecord, payload []byte) {
 		if i > 0 {
 			key = baseKey + "_" + strconv.Itoa(i)
 		}
-		record.Attributes().PutStr(key, string(payload[start:end]))
+		chunks[key] = string(payload[start:end])
 	}
+	return chunks
+}
+
+// trimReasonPreview strips the "Preview of field's value: '...'" suffix that OpenSearch appends
+// to mapper_parsing_exception reasons, which can contain the full field value.
+func trimReasonPreview(reason string) string {
+	const previewMarker = ". Preview of field's value:"
+	if idx := strings.Index(reason, previewMarker); idx != -1 {
+		return reason[:idx]
+	}
+	return reason
 }
 
 func (lbi *logBulkIndexer) submitToOnError(_ context.Context, resp opensearchapi.BulkRespItem, originalPayload []byte) {
@@ -208,17 +220,21 @@ func (lbi *logBulkIndexer) submitToOnError(_ context.Context, resp opensearchapi
 			errType = resp.Error.Type
 		}
 		if resp.Error.Reason != "" {
-			errReason = resp.Error.Reason
+			errReason = trimReasonPreview(resp.Error.Reason)
 		}
 	}
+	errorFields := map[string]any{
+		"type":   errType,
+		"reason": errReason,
+		"status": resp.Status,
+		"class":  classifyError(resp.Status, errType, lbi.errorClassification),
+	}
+	for k, v := range originalLogChunks(originalPayload) {
+		errorFields[k] = v
+	}
 	envelope := map[string]any{
-		"error": map[string]any{
-			"type":           errType,
-			"reason":         errReason,
-			"status":         resp.Status,
-			"classification": classifyError(resp.Status, errType, lbi.errorClassification),
-		},
-		"original": json.RawMessage(originalPayload),
+		"@timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+		"error":      errorFields,
 	}
 	doc, err := json.Marshal(envelope)
 	if err != nil {

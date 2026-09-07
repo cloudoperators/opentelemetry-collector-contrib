@@ -86,15 +86,15 @@ func TestProcessItemFailure(t *testing.T) {
 
 func TestProcessItemFailureStampsAttributes(t *testing.T) {
 	tests := []struct {
-		name                   string
-		status                 int
-		errType                string
-		errReason              string
-		expectType             string
-		expectReason           string
-		expectStatus           int64
-		expectClassification   string
-		expectAttrsSet         bool
+		name                 string
+		status               int
+		errType              string
+		errReason            string
+		expectType           string
+		expectReason         string
+		expectStatus         int64
+		expectClassification string
+		expectAttrsSet       bool
 	}{
 		{
 			name:                 "permanent mapping error stamps all attrs",
@@ -162,15 +162,15 @@ func TestProcessItemFailureStampsAttributes(t *testing.T) {
 			if v, ok := attrs.Get("opensearch.error.status"); !ok || v.Int() != tt.expectStatus {
 				t.Errorf("expected opensearch.error.status=%d, got ok=%v value=%d", tt.expectStatus, ok, v.Int())
 			}
-			if v, ok := attrs.Get("opensearch.error.classification"); !ok || v.AsString() != tt.expectClassification {
-				t.Errorf("expected opensearch.error.classification=%q, got ok=%v value=%q", tt.expectClassification, ok, v.AsString())
+			if v, ok := attrs.Get("opensearch.error.class"); !ok || v.AsString() != tt.expectClassification {
+				t.Errorf("expected opensearch.error.class=%q, got ok=%v value=%q", tt.expectClassification, ok, v.AsString())
 			}
 		})
 	}
 }
 
 func TestProcessItemFailureUsesUserClassification(t *testing.T) {
-	cfg := &ErrorClassificationConfig{
+	cfg := &ErrorClassConfig{
 		Permanent: []string{"custom_permanent_error"},
 		Transient: []string{"custom_transient_error"},
 	}
@@ -184,9 +184,9 @@ func TestProcessItemFailureUsesUserClassification(t *testing.T) {
 
 	lbi.processItemFailure(t.Context(), resp, nil, logRecord, nil, rs.Resource(), rs.SchemaUrl(), ss.Scope(), ss.SchemaUrl())
 
-	v, ok := logRecord.Attributes().Get("opensearch.error.classification")
+	v, ok := logRecord.Attributes().Get("opensearch.error.class")
 	if !ok || v.AsString() != "permanent" {
-		t.Errorf("expected classification=permanent from user override, got ok=%v value=%q", ok, v.AsString())
+		t.Errorf("expected class=permanent from user override, got ok=%v value=%q", ok, v.AsString())
 	}
 }
 
