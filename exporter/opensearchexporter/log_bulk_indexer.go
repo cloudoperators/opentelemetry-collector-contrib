@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/opensearch-project/opensearch-go/v4/opensearchapi"
@@ -130,6 +131,27 @@ func makeLog(resource pcommon.Resource, resourceSchemaURL string, scope pcommon.
 }
 
 func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensearchapi.BulkRespItem, itemErr error, originalLogRecord plog.LogRecord, originalPayload []byte, resource pcommon.Resource, resourceSchemaURL string, scope pcommon.InstrumentationScope, scopeSchemaURL string) {
+	logs, classification := lbi.formatItemError(resp, originalLogRecord, originalPayload, resource, resourceSchemaURL, scope, scopeSchemaURL)
+
+	switch {
+	case classification == "transient":
+		// Retryable per HTTP status or user/built-in classification override.
+		lbi.appendRetryLogError(responseAsError(resp), logs)
+
+	case resp.Status != 0 && itemErr == nil:
+		// Permanent indexing error — route to on error index if configured, otherwise return to pipeline
+		if lbi.onErrorIndex != "" {
+			lbi.submitToOnError(ctx, resp, originalPayload)
+		} else {
+			lbi.appendPermanentError(responseAsError(resp))
+		}
+
+	default:
+		lbi.appendPermanentError(itemErr)
+	}
+}
+
+func (lbi *logBulkIndexer) formatItemError(resp opensearchapi.BulkRespItem, originalLogRecord plog.LogRecord, originalPayload []byte, resource pcommon.Resource, resourceSchemaURL string, scope pcommon.InstrumentationScope, scopeSchemaURL string) (plog.Logs, string) {
 	// Stamp error attributes on ORIGINAL record (mutate in place so downstream consumers can act on them).
 	// resp.Error may be nil when OpenSearch reports only a status (e.g. transport-level failures surfaced
 	// via itemErr), so we default type/reason to "unknown" and always stamp status + classification when a
@@ -151,28 +173,30 @@ func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensear
 			originalLogRecord.Attributes().PutInt("opensearch.error.status", int64(resp.Status))
 		}
 		originalLogRecord.Attributes().PutStr("opensearch.error.classification", classifyError(resp.Status, errType, lbi.errorClassification))
+		stampOriginalLogChunks(originalLogRecord, originalPayload)
 	}
 
-	// Build copy AFTER stamping original so copy also has attrs
-	logs := makeLog(resource, resourceSchemaURL, scope, scopeSchemaURL, originalLogRecord)
+	return makeLog(resource, resourceSchemaURL, scope, scopeSchemaURL, originalLogRecord), classifyError(resp.Status, errType, lbi.errorClassification)
 
-	classification := classifyError(resp.Status, errType, lbi.errorClassification)
+}
 
-	switch {
-	case classification == "transient":
-		// Retryable per HTTP status or user/built-in classification override.
-		lbi.appendRetryLogError(responseAsError(resp), logs)
+// luceneMaxFieldBytes is the Lucene UTF-8 field length limit.
+const luceneMaxFieldBytes = 32766
 
-	case resp.Status != 0 && itemErr == nil:
-		// Permanent indexing error — route to on error index if configured, otherwise return to pipeline
-		if lbi.onErrorIndex != "" {
-			lbi.submitToOnError(ctx, resp, originalPayload)
-		} else {
-			lbi.appendPermanentError(responseAsError(resp))
+// stampOriginalLogChunks stores the already-encoded payload as opensearch.error.original_log
+// (and opensearch.error.original_log_1, _2, … when the payload exceeds the Lucene limit).
+func stampOriginalLogChunks(record plog.LogRecord, payload []byte) {
+	baseKey := "opensearch.error.original_log"
+	for i, start := 0, 0; start < len(payload); i, start = i+1, start+luceneMaxFieldBytes {
+		end := start + luceneMaxFieldBytes
+		if end > len(payload) {
+			end = len(payload)
 		}
-
-	default:
-		lbi.appendPermanentError(itemErr)
+		key := baseKey
+		if i > 0 {
+			key = baseKey + "_" + strconv.Itoa(i)
+		}
+		record.Attributes().PutStr(key, string(payload[start:end]))
 	}
 }
 
