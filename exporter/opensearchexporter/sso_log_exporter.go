@@ -25,9 +25,10 @@ type logExporter struct {
 	telemetry     component.TelemetrySettings
 	config        *Config
 	indexResolver *indexResolver
+	metrics       *exporterMetrics
 }
 
-func newLogExporter(cfg *Config, set exporter.Settings) *logExporter {
+func newLogExporter(cfg *Config, set exporter.Settings) (*logExporter, error) {
 	var model mappingModel
 	if cfg.Mode == MappingBodyMap.String() {
 		model = &bodyMapMappingModel{
@@ -46,6 +47,11 @@ func newLogExporter(cfg *Config, set exporter.Settings) *logExporter {
 		}
 	}
 
+	metrics, err := newExporterMetrics(set.TelemetrySettings.MeterProvider)
+	if err != nil {
+		return nil, err
+	}
+
 	return &logExporter{
 		telemetry:     set.TelemetrySettings,
 		bulkAction:    cfg.BulkAction,
@@ -53,7 +59,8 @@ func newLogExporter(cfg *Config, set exporter.Settings) *logExporter {
 		model:         model,
 		config:        cfg,
 		indexResolver: newIndexResolver("ss4o_logs", cfg.Dataset, cfg.Namespace),
-	}
+		metrics:       metrics,
+	}, nil
 }
 
 func (l *logExporter) Start(ctx context.Context, host component.Host) error {
@@ -72,7 +79,7 @@ func (l *logExporter) Start(ctx context.Context, host component.Host) error {
 }
 
 func (l *logExporter) pushLogData(ctx context.Context, ld plog.Logs) error {
-	indexer := newLogBulkIndexer(l.bulkAction, l.model, l.config.Pipeline, &l.config.ErrorClass, l.config.LogsIndexOnError)
+	indexer := newLogBulkIndexer(l.bulkAction, l.model, l.config.Pipeline, &l.config.ErrorClass, l.config.LogsIndexOnError, l.metrics)
 	startErr := indexer.start(l.client)
 	if startErr != nil {
 		return startErr

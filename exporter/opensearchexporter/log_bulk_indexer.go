@@ -28,9 +28,10 @@ type logBulkIndexer struct {
 	errorClassification *ErrorClassConfig
 	onErrorIndex        string
 	onErrorDocs         [][]byte
+	metrics             *exporterMetrics
 }
 
-func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, errorClassification *ErrorClassConfig, onErrorIndex string) *logBulkIndexer {
+func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, errorClassification *ErrorClassConfig, onErrorIndex string, metrics *exporterMetrics) *logBulkIndexer {
 	return &logBulkIndexer{
 		bulkAction:          bulkAction,
 		pipeline:            pipeline,
@@ -39,6 +40,7 @@ func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, e
 		bulkIndexer:         nil,
 		errorClassification: errorClassification,
 		onErrorIndex:        onErrorIndex,
+		metrics:             metrics,
 	}
 }
 
@@ -134,16 +136,30 @@ func makeLog(resource pcommon.Resource, resourceSchemaURL string, scope pcommon.
 func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensearchapi.BulkRespItem, itemErr error, originalLogRecord plog.LogRecord, originalPayload []byte, resource pcommon.Resource, resourceSchemaURL string, scope pcommon.InstrumentationScope, scopeSchemaURL string) {
 	logs, class := lbi.formatItemError(resp, originalLogRecord, resource, resourceSchemaURL, scope, scopeSchemaURL)
 
+	errType := "unknown"
+	if resp.Error != nil && resp.Error.Type != "" {
+		errType = resp.Error.Type
+	}
+
 	switch {
 	case class == "transient":
 		// Retryable per HTTP status or user/built-in class override.
+		if lbi.metrics != nil {
+			lbi.metrics.recordTransientError(ctx, errType)
+		}
 		lbi.appendRetryLogError(responseAsError(resp), logs)
 
 	case resp.Status != 0 && itemErr == nil:
 		// Permanent indexing error — route to on error index if configured, otherwise return to pipeline
 		if lbi.onErrorIndex != "" {
+			if lbi.metrics != nil {
+				lbi.metrics.recordOnErrorDoc(ctx, errType, class, resp.Status)
+			}
 			lbi.submitToOnError(ctx, resp, originalPayload)
 		} else {
+			if lbi.metrics != nil {
+				lbi.metrics.recordPermanentError(ctx, errType, class, resp.Status)
+			}
 			lbi.appendPermanentError(responseAsError(resp))
 		}
 
@@ -248,6 +264,11 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 	if len(lbi.onErrorDocs) == 0 {
 		return nil
 	}
+	recordFlushFailure := func() {
+		if lbi.metrics != nil {
+			lbi.metrics.recordOnErrorFlushFailure(ctx)
+		}
+	}
 	onErrorIndexer, err := newLogOpenSearchBulkIndexer(client, lbi.onIndexerError, lbi.pipeline)
 	if err != nil {
 		return err
@@ -260,6 +281,7 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 			Body:   bytes.NewReader(doc),
 		}
 		item.OnFailure = func(_ context.Context, _ opensearchutil.BulkIndexerItem, resp opensearchapi.BulkRespItem, itemErr error) {
+			recordFlushFailure()
 			if itemErr != nil {
 				lbi.appendPermanentError(itemErr)
 				return
