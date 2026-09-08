@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -164,7 +165,21 @@ func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensear
 		}
 
 	default:
-		lbi.appendPermanentError(itemErr)
+		// Transport/network errors or unexpected issues from bulk indexer
+		var netErr net.Error
+		if errors.As(itemErr, &netErr) {
+			// Network error (connection refused, timeout, etc.) — retry
+			if lbi.metrics != nil {
+				lbi.metrics.recordTransientError(ctx, "network_error")
+			}
+			lbi.appendRetryLogError(itemErr, logs)
+		} else {
+			// Other unexpected error — permanent
+			if lbi.metrics != nil {
+				lbi.metrics.recordPermanentError(ctx, "unknown", "permanent", 0)
+			}
+			lbi.appendPermanentError(itemErr)
+		}
 	}
 }
 
