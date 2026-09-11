@@ -291,7 +291,7 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 	for _, doc := range lbi.onErrorDocs {
 		doc := doc
 		item := opensearchutil.BulkIndexerItem{
-			Action: "index",
+			Action: lbi.bulkAction,
 			Index:  lbi.onErrorIndex,
 			Body:   bytes.NewReader(doc),
 		}
