@@ -3,7 +3,7 @@
 
 package opensearchexporter // import "github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter"
 
-func classifyError(status int, errorType string, cfg *ErrorClassificationConfig) string {
+func classifyError(status int, errorType string, cfg *ErrorClassConfig) string {
 	// Check user-supplied overrides first
 	if cfg != nil {
 		for _, t := range cfg.Permanent {

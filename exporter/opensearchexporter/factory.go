@@ -62,7 +62,10 @@ func createLogsExporter(ctx context.Context,
 	cfg component.Config,
 ) (exporter.Logs, error) {
 	c := cfg.(*Config)
-	le := newLogExporter(c, set)
+	le, err := newLogExporter(c, set)
+	if err != nil {
+		return nil, err
+	}
 
 	return exporterhelper.NewLogs(ctx, set, cfg,
 		le.pushLogData,

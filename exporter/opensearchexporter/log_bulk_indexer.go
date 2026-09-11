@@ -8,6 +8,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/opensearch-project/opensearch-go/v4/opensearchapi"
@@ -23,12 +26,13 @@ type logBulkIndexer struct {
 	model               mappingModel
 	errs                []error
 	bulkIndexer         opensearchutil.BulkIndexer
-	errorClassification *ErrorClassificationConfig
+	errorClassification *ErrorClassConfig
 	onErrorIndex        string
 	onErrorDocs         [][]byte
+	metrics             *exporterMetrics
 }
 
-func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, errorClassification *ErrorClassificationConfig, onErrorIndex string) *logBulkIndexer {
+func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, errorClassification *ErrorClassConfig, onErrorIndex string, metrics *exporterMetrics) *logBulkIndexer {
 	return &logBulkIndexer{
 		bulkAction:          bulkAction,
 		pipeline:            pipeline,
@@ -37,6 +41,7 @@ func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, e
 		bulkIndexer:         nil,
 		errorClassification: errorClassification,
 		onErrorIndex:        onErrorIndex,
+		metrics:             metrics,
 	}
 }
 
@@ -130,9 +135,58 @@ func makeLog(resource pcommon.Resource, resourceSchemaURL string, scope pcommon.
 }
 
 func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensearchapi.BulkRespItem, itemErr error, originalLogRecord plog.LogRecord, originalPayload []byte, resource pcommon.Resource, resourceSchemaURL string, scope pcommon.InstrumentationScope, scopeSchemaURL string) {
+	logs, class := lbi.formatItemError(resp, originalLogRecord, resource, resourceSchemaURL, scope, scopeSchemaURL)
+
+	errType := "unknown"
+	if resp.Error != nil && resp.Error.Type != "" {
+		errType = resp.Error.Type
+	}
+
+	switch {
+	case class == "transient":
+		// Retryable per HTTP status or user/built-in class override.
+		if lbi.metrics != nil {
+			lbi.metrics.recordTransientError(ctx, errType)
+		}
+		lbi.appendRetryLogError(responseAsError(resp), logs)
+
+	case resp.Status != 0 && itemErr == nil:
+		// Permanent indexing error — route to on error index if configured, otherwise return to pipeline
+		if lbi.onErrorIndex != "" {
+			if lbi.metrics != nil {
+				lbi.metrics.recordOnErrorDoc(ctx, errType, class, resp.Status)
+			}
+			lbi.submitToOnError(ctx, resp, originalPayload)
+		} else {
+			if lbi.metrics != nil {
+				lbi.metrics.recordPermanentError(ctx, errType, class, resp.Status)
+			}
+			lbi.appendPermanentError(responseAsError(resp))
+		}
+
+	default:
+		// Transport/network errors or unexpected issues from bulk indexer
+		var netErr net.Error
+		if errors.As(itemErr, &netErr) {
+			// Network error (connection refused, timeout, etc.) — retry
+			if lbi.metrics != nil {
+				lbi.metrics.recordTransientError(ctx, "network_error")
+			}
+			lbi.appendRetryLogError(itemErr, logs)
+		} else {
+			// Other unexpected error — permanent
+			if lbi.metrics != nil {
+				lbi.metrics.recordPermanentError(ctx, "unknown", "permanent", 0)
+			}
+			lbi.appendPermanentError(itemErr)
+		}
+	}
+}
+
+func (lbi *logBulkIndexer) formatItemError(resp opensearchapi.BulkRespItem, originalLogRecord plog.LogRecord, resource pcommon.Resource, resourceSchemaURL string, scope pcommon.InstrumentationScope, scopeSchemaURL string) (plog.Logs, string) {
 	// Stamp error attributes on ORIGINAL record (mutate in place so downstream consumers can act on them).
 	// resp.Error may be nil when OpenSearch reports only a status (e.g. transport-level failures surfaced
-	// via itemErr), so we default type/reason to "unknown" and always stamp status + classification when a
+	// via itemErr), so we default type/reason to "unknown" and always stamp status + class when a
 	// status is present.
 	errType := "unknown"
 	errReason := "unknown"
@@ -141,7 +195,7 @@ func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensear
 			errType = resp.Error.Type
 		}
 		if resp.Error.Reason != "" {
-			errReason = resp.Error.Reason
+			errReason = trimReasonPreview(resp.Error.Reason)
 		}
 	}
 	if resp.Status != 0 || resp.Error != nil {
@@ -150,30 +204,43 @@ func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensear
 		if resp.Status != 0 {
 			originalLogRecord.Attributes().PutInt("opensearch.error.status", int64(resp.Status))
 		}
-		originalLogRecord.Attributes().PutStr("opensearch.error.classification", classifyError(resp.Status, errType, lbi.errorClassification))
+		originalLogRecord.Attributes().PutStr("opensearch.error.class", classifyError(resp.Status, errType, lbi.errorClassification))
 	}
 
-	// Build copy AFTER stamping original so copy also has attrs
-	logs := makeLog(resource, resourceSchemaURL, scope, scopeSchemaURL, originalLogRecord)
+	return makeLog(resource, resourceSchemaURL, scope, scopeSchemaURL, originalLogRecord), classifyError(resp.Status, errType, lbi.errorClassification)
+}
 
-	classification := classifyError(resp.Status, errType, lbi.errorClassification)
+// luceneMaxFieldBytes is a safe chunk size that stays under the 32766-byte Lucene keyword limit
+// even when the payload contains multi-byte UTF-8 sequences.
+const luceneMaxFieldBytes = 32000
 
-	switch {
-	case classification == "transient":
-		// Retryable per HTTP status or user/built-in classification override.
-		lbi.appendRetryLogError(responseAsError(resp), logs)
-
-	case resp.Status != 0 && itemErr == nil:
-		// Permanent indexing error — route to on error index if configured, otherwise return to pipeline
-		if lbi.onErrorIndex != "" {
-			lbi.submitToOnError(ctx, resp, originalPayload)
-		} else {
-			lbi.appendPermanentError(responseAsError(resp))
+// originalLogChunks splits the payload into strings that each fit within the Lucene field limit,
+// keyed as original_log, original_log_1, original_log_2, … for the on-error index envelope.
+func originalLogChunks(payload []byte) map[string]string {
+	chunks := map[string]string{}
+	baseKey := "original_log"
+	for i, start := 0, 0; start < len(payload); i, start = i+1, start+luceneMaxFieldBytes {
+		end := start + luceneMaxFieldBytes
+		if end > len(payload) {
+			end = len(payload)
 		}
-
-	default:
-		lbi.appendPermanentError(itemErr)
+		key := baseKey
+		if i > 0 {
+			key = baseKey + "_" + strconv.Itoa(i)
+		}
+		chunks[key] = string(payload[start:end])
 	}
+	return chunks
+}
+
+// trimReasonPreview strips the "Preview of field's value: '...'" suffix that OpenSearch appends
+// to mapper_parsing_exception reasons, which can contain the full field value.
+func trimReasonPreview(reason string) string {
+	const previewMarker = ". Preview of field's value:"
+	if idx := strings.Index(reason, previewMarker); idx != -1 {
+		return reason[:idx]
+	}
+	return reason
 }
 
 func (lbi *logBulkIndexer) submitToOnError(_ context.Context, resp opensearchapi.BulkRespItem, originalPayload []byte) {
@@ -184,17 +251,21 @@ func (lbi *logBulkIndexer) submitToOnError(_ context.Context, resp opensearchapi
 			errType = resp.Error.Type
 		}
 		if resp.Error.Reason != "" {
-			errReason = resp.Error.Reason
+			errReason = trimReasonPreview(resp.Error.Reason)
 		}
 	}
+	errorFields := map[string]any{
+		"type":   errType,
+		"reason": errReason,
+		"status": resp.Status,
+		"class":  classifyError(resp.Status, errType, lbi.errorClassification),
+	}
+	for k, v := range originalLogChunks(originalPayload) {
+		errorFields[k] = v
+	}
 	envelope := map[string]any{
-		"error": map[string]any{
-			"type":           errType,
-			"reason":         errReason,
-			"status":         resp.Status,
-			"classification": classifyError(resp.Status, errType, lbi.errorClassification),
-		},
-		"original": json.RawMessage(originalPayload),
+		"@timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+		"error":      errorFields,
 	}
 	doc, err := json.Marshal(envelope)
 	if err != nil {
@@ -208,6 +279,11 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 	if len(lbi.onErrorDocs) == 0 {
 		return nil
 	}
+	recordFlushFailure := func() {
+		if lbi.metrics != nil {
+			lbi.metrics.recordOnErrorFlushFailure(ctx)
+		}
+	}
 	onErrorIndexer, err := newLogOpenSearchBulkIndexer(client, lbi.onIndexerError, lbi.pipeline)
 	if err != nil {
 		return err
@@ -220,6 +296,7 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 			Body:   bytes.NewReader(doc),
 		}
 		item.OnFailure = func(_ context.Context, _ opensearchutil.BulkIndexerItem, resp opensearchapi.BulkRespItem, itemErr error) {
+			recordFlushFailure()
 			if itemErr != nil {
 				lbi.appendPermanentError(itemErr)
 				return

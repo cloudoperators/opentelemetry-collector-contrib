@@ -194,10 +194,10 @@ When an OpenSearch bulk response reports a per-item failure, the exporter stamps
 - `opensearch.error.type` — the OpenSearch error type (e.g. `mapper_parsing_exception`); `unknown` when the response does not include one.
 - `opensearch.error.reason` — the human-readable reason from OpenSearch; `unknown` when the response does not include one.
 - `opensearch.error.status` — the HTTP status returned for the item.
-- `opensearch.error.classification` — either `permanent` or `transient`, indicating whether the failure is worth retrying.
+- `opensearch.error.class` — either `permanent` or `transient`, indicating whether the failure is worth retrying.
 
 Classification is decided in this order:
-1. User-supplied overrides under `error_classification.permanent` / `error_classification.transient` (matched by error type).
+1. User-supplied overrides under `error_class.permanent` / `error_class.transient` (matched by error type).
 2. Built-in permanent types: `mapper_parsing_exception`, `document_parsing_exception`, `strict_dynamic_mapping_exception`, `illegal_argument_exception`, `document_missing_exception`, `version_conflict_engine_exception`, `resource_already_exists_exception`.
 3. Built-in transient types: `es_rejected_execution_exception`, `unavailable_shards_exception`, `cluster_block_exception`, `timeout_exception`, `circuit_breaking_exception`.
 4. Fallback to HTTP status: `429`, `500`, `502`, `503`, `504` are transient; everything else is permanent.
@@ -207,7 +207,7 @@ Configuration:
 ```yaml
 exporters:
   opensearch:
-    error_classification:
+    error_class:
       permanent:
         - mapper_parsing_exception
         - strict_dynamic_mapping_exception

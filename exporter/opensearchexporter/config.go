@@ -68,13 +68,13 @@ type Config struct {
 	// https://opensearch.org/docs/latest/ingest-pipelines/
 	Pipeline string `mapstructure:"pipeline"`
 
-	// ErrorClassification defines custom error type classification for "on error" routing.
-	// User-supplied classifications override built-in defaults.
-	ErrorClassification ErrorClassificationConfig `mapstructure:"error_classification"`
+	// ErrorClass defines custom error type class for "on error" routing.
+	// User-supplied classs override built-in defaults.
+	ErrorClass ErrorClassConfig `mapstructure:"error_class"`
 }
 
-// ErrorClassificationConfig allows customizing which OpenSearch error types are permanent vs transient.
-type ErrorClassificationConfig struct {
+// ErrorClassConfig allows customizing which OpenSearch error types are permanent vs transient.
+type ErrorClassConfig struct {
 	// Permanent lists error types that should be classified as permanent (not retriable).
 	// Examples: mapper_parsing_exception, illegal_argument_exception
 	Permanent []string `mapstructure:"permanent"`
