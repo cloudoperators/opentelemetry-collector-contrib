@@ -24,7 +24,7 @@ func newExporterMetrics(mp metric.MeterProvider) (*exporterMetrics, error) {
 	meter := mp.Meter(metadata.ScopeName)
 
 	onErrorDocsTotal, err := meter.Int64Counter(
-		"opensearch_exporter_on_error_docs_total",
+		"otelcol_opensearch_exporter_on_error_docs",
 		metric.WithDescription("Number of documents routed to the on-error index due to permanent indexing failures."),
 		metric.WithUnit("{document}"),
 	)
@@ -33,7 +33,7 @@ func newExporterMetrics(mp metric.MeterProvider) (*exporterMetrics, error) {
 	}
 
 	onErrorFlushFailureTotal, err := meter.Int64Counter(
-		"opensearch_exporter_on_error_flush_failures_total",
+		"otelcol_opensearch_exporter_on_error_flush_failures",
 		metric.WithDescription("Number of failures when flushing documents to the on-error index."),
 		metric.WithUnit("{failure}"),
 	)
@@ -42,7 +42,7 @@ func newExporterMetrics(mp metric.MeterProvider) (*exporterMetrics, error) {
 	}
 
 	permanentErrorsTotal, err := meter.Int64Counter(
-		"opensearch_exporter_permanent_errors_total",
+		"otelcol_opensearch_exporter_permanent_errors",
 		metric.WithDescription("Number of documents that encountered a permanent indexing error."),
 		metric.WithUnit("{document}"),
 	)
@@ -51,7 +51,7 @@ func newExporterMetrics(mp metric.MeterProvider) (*exporterMetrics, error) {
 	}
 
 	transientErrorsTotal, err := meter.Int64Counter(
-		"opensearch_exporter_transient_errors_total",
+		"otelcol_opensearch_exporter_transient_errors",
 		metric.WithDescription("Number of documents that encountered a transient (retriable) indexing error."),
 		metric.WithUnit("{document}"),
 	)
