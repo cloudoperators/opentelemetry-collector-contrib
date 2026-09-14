@@ -63,7 +63,7 @@ func TestRecordOnErrorDoc(t *testing.T) {
 	m.recordOnErrorDoc(ctx, "mapper_parsing_exception", "permanent", 400)
 	m.recordOnErrorDoc(ctx, "illegal_argument_exception", "permanent", 400)
 
-	sums := collectInt64Sum(t, reader, "opensearch_exporter_on_error_docs_total")
+	sums := collectInt64Sum(t, reader, "otelcol_opensearch_exporter_on_error_docs")
 	assert.Equal(t, int64(2), sums["error_class=permanent,error_type=mapper_parsing_exception,status=400"])
 	assert.Equal(t, int64(1), sums["error_class=permanent,error_type=illegal_argument_exception,status=400"])
 }
@@ -75,7 +75,7 @@ func TestRecordOnErrorFlushFailure(t *testing.T) {
 	m.recordOnErrorFlushFailure(ctx)
 	m.recordOnErrorFlushFailure(ctx)
 
-	sums := collectInt64Sum(t, reader, "opensearch_exporter_on_error_flush_failures_total")
+	sums := collectInt64Sum(t, reader, "otelcol_opensearch_exporter_on_error_flush_failures")
 	total := int64(0)
 	for _, v := range sums {
 		total += v
@@ -89,7 +89,7 @@ func TestRecordPermanentError(t *testing.T) {
 
 	m.recordPermanentError(ctx, "version_conflict_engine_exception", "permanent", 409)
 
-	sums := collectInt64Sum(t, reader, "opensearch_exporter_permanent_errors_total")
+	sums := collectInt64Sum(t, reader, "otelcol_opensearch_exporter_permanent_errors")
 	assert.Equal(t, int64(1), sums["error_class=permanent,error_type=version_conflict_engine_exception,status=409"])
 }
 
@@ -100,7 +100,7 @@ func TestRecordTransientError(t *testing.T) {
 	m.recordTransientError(ctx, "es_rejected_execution_exception")
 	m.recordTransientError(ctx, "es_rejected_execution_exception")
 
-	sums := collectInt64Sum(t, reader, "opensearch_exporter_transient_errors_total")
+	sums := collectInt64Sum(t, reader, "otelcol_opensearch_exporter_transient_errors")
 	assert.Equal(t, int64(2), sums["error_type=es_rejected_execution_exception"])
 }
 
@@ -155,9 +155,9 @@ func TestLogBulkIndexerRecordsMetricsOnItemFailure(t *testing.T) {
 
 			lbi.processItemFailure(ctx, resp, nil, logRecord, []byte(`{}`), rs.Resource(), rs.SchemaUrl(), ss.Scope(), ss.SchemaUrl())
 
-			onError := collectInt64Sum(t, localReader, "opensearch_exporter_on_error_docs_total")
-			permanent := collectInt64Sum(t, localReader, "opensearch_exporter_permanent_errors_total")
-			transient := collectInt64Sum(t, localReader, "opensearch_exporter_transient_errors_total")
+			onError := collectInt64Sum(t, localReader, "otelcol_opensearch_exporter_on_error_docs")
+			permanent := collectInt64Sum(t, localReader, "otelcol_opensearch_exporter_permanent_errors")
+			transient := collectInt64Sum(t, localReader, "otelcol_opensearch_exporter_transient_errors")
 
 			totalOnError := int64(0)
 			for _, v := range onError {

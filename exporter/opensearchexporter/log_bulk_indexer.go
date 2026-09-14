@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
+	"go.uber.org/zap"
 )
 
 type logBulkIndexer struct {
@@ -30,9 +31,13 @@ type logBulkIndexer struct {
 	onErrorIndex        string
 	onErrorDocs         [][]byte
 	metrics             *exporterMetrics
+	logger              *zap.Logger
 }
 
-func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, errorClassification *ErrorClassConfig, onErrorIndex string, metrics *exporterMetrics) *logBulkIndexer {
+func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, errorClassification *ErrorClassConfig, onErrorIndex string, metrics *exporterMetrics, logger *zap.Logger) *logBulkIndexer {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 	return &logBulkIndexer{
 		bulkAction:          bulkAction,
 		pipeline:            pipeline,
@@ -42,7 +47,15 @@ func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, e
 		errorClassification: errorClassification,
 		onErrorIndex:        onErrorIndex,
 		metrics:             metrics,
+		logger:              logger,
 	}
+}
+
+func (lbi *logBulkIndexer) log() *zap.Logger {
+	if lbi.logger == nil {
+		return zap.NewNop()
+	}
+	return lbi.logger
 }
 
 func (lbi *logBulkIndexer) start(client *opensearchapi.Client) error {
@@ -58,12 +71,16 @@ func (lbi *logBulkIndexer) joinedError() error {
 func (lbi *logBulkIndexer) close(ctx context.Context) {
 	closeErr := lbi.bulkIndexer.Close(ctx)
 	if closeErr != nil {
+		lbi.log().Debug("main bulk indexer close returned error", zap.Error(closeErr))
 		lbi.errs = append(lbi.errs, closeErr)
 	}
 }
 
 func (lbi *logBulkIndexer) onIndexerError(_ context.Context, indexerErr error) {
 	if indexerErr != nil {
+		lbi.log().Debug("opensearch bulk indexer transport error",
+			zap.Error(indexerErr),
+		)
 		lbi.appendPermanentError(consumererror.NewPermanent(indexerErr))
 	}
 }
@@ -77,6 +94,7 @@ func (lbi *logBulkIndexer) appendRetryLogError(err error, log plog.Logs) {
 }
 
 func (lbi *logBulkIndexer) submit(ctx context.Context, ld plog.Logs, ir *indexResolver, cfg *Config, timestamp time.Time) {
+	lbi.log().Debug("opensearch log bulk indexer submit", zap.Int("resource_log_count", ld.ResourceLogs().Len()), zap.String("logs_index", cfg.LogsIndex), zap.String("on_error_index", lbi.onErrorIndex))
 	keys := ir.extractPlaceholderKeys(cfg.LogsIndex)
 	timeSuffix := ir.calculateTimeSuffix(cfg.LogsIndexTimeFormat, timestamp)
 	resourceLogs := ld.ResourceLogs()
@@ -95,6 +113,7 @@ func (lbi *logBulkIndexer) submit(ctx context.Context, ld plog.Logs, ir *indexRe
 			for k := 0; k < logs.Len(); k++ {
 				log := logs.At(k)
 				indexName := ir.resolveIndexName(cfg.LogsIndex, cfg.LogsIndexFallback, log.Attributes(), keys, scopeAttrs, resourceAttrs, timeSuffix)
+				lbi.log().Debug("opensearch dispatching log item", zap.String("index", indexName))
 				lbi.processItem(ctx, indexName, resource, il.SchemaUrl(), scopeSpan.Scope(), scopeSpan.SchemaUrl(), log)
 			}
 		}
@@ -104,6 +123,7 @@ func (lbi *logBulkIndexer) submit(ctx context.Context, ld plog.Logs, ir *indexRe
 func (lbi *logBulkIndexer) processItem(ctx context.Context, indexName string, resource pcommon.Resource, resourceSchemaURL string, scope pcommon.InstrumentationScope, scopeSchemaURL string, logRecord plog.LogRecord) {
 	payload, err := lbi.model.encodeLog(resource, scope, scopeSchemaURL, logRecord)
 	if err != nil {
+		lbi.log().Debug("failed to encode log record", zap.Error(err), zap.String("index", indexName))
 		lbi.appendPermanentError(err)
 	} else {
 		ItemFailureHandler := func(itemCtx context.Context, _ opensearchutil.BulkIndexerItem, resp opensearchapi.BulkRespItem, itemErr error) {
@@ -113,6 +133,10 @@ func (lbi *logBulkIndexer) processItem(ctx context.Context, indexName string, re
 		bi.OnFailure = ItemFailureHandler
 		err = lbi.bulkIndexer.Add(ctx, bi)
 		if err != nil {
+			lbi.log().Debug("failed to enqueue log item to bulk indexer, will retry",
+				zap.Error(err),
+				zap.String("index", indexName),
+			)
 			lbi.appendRetryLogError(err, makeLog(resource, resourceSchemaURL, scope, scopeSchemaURL, logRecord))
 		}
 	}
@@ -135,16 +159,29 @@ func makeLog(resource pcommon.Resource, resourceSchemaURL string, scope pcommon.
 }
 
 func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensearchapi.BulkRespItem, itemErr error, originalLogRecord plog.LogRecord, originalPayload []byte, resource pcommon.Resource, resourceSchemaURL string, scope pcommon.InstrumentationScope, scopeSchemaURL string) {
+	lbi.log().Debug("opensearch item failure callback fired", zap.Int("status", resp.Status), zap.String("index", resp.Index))
 	logs, class := lbi.formatItemError(resp, originalLogRecord, resource, resourceSchemaURL, scope, scopeSchemaURL)
 
 	errType := "unknown"
-	if resp.Error != nil && resp.Error.Type != "" {
-		errType = resp.Error.Type
+	errReason := "unknown"
+	if resp.Error != nil {
+		if resp.Error.Type != "" {
+			errType = resp.Error.Type
+		}
+		if resp.Error.Reason != "" {
+			errReason = trimReasonPreview(resp.Error.Reason)
+		}
 	}
 
 	switch {
 	case class == "transient":
 		// Retryable per HTTP status or user/built-in class override.
+		lbi.log().Debug("opensearch item transient error, will retry",
+			zap.Int("status", resp.Status),
+			zap.String("error_type", errType),
+			zap.String("error_reason", errReason),
+			zap.String("index", resp.Index),
+		)
 		if lbi.metrics != nil {
 			lbi.metrics.recordTransientError(ctx, errType)
 		}
@@ -153,11 +190,26 @@ func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensear
 	case resp.Status != 0 && itemErr == nil:
 		// Permanent indexing error — route to on error index if configured, otherwise return to pipeline
 		if lbi.onErrorIndex != "" {
+			lbi.log().Debug("opensearch item permanent error, routing to on-error index",
+				zap.Int("status", resp.Status),
+				zap.String("error_type", errType),
+				zap.String("error_reason", errReason),
+				zap.String("error_class", class),
+				zap.String("main_index", resp.Index),
+				zap.String("on_error_index", lbi.onErrorIndex),
+			)
 			if lbi.metrics != nil {
 				lbi.metrics.recordOnErrorDoc(ctx, errType, class, resp.Status)
 			}
 			lbi.submitToOnError(ctx, resp, originalPayload)
 		} else {
+			lbi.log().Debug("opensearch item permanent error, no on-error index configured, dropping",
+				zap.Int("status", resp.Status),
+				zap.String("error_type", errType),
+				zap.String("error_reason", errReason),
+				zap.String("error_class", class),
+				zap.String("index", resp.Index),
+			)
 			if lbi.metrics != nil {
 				lbi.metrics.recordPermanentError(ctx, errType, class, resp.Status)
 			}
@@ -169,12 +221,21 @@ func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensear
 		var netErr net.Error
 		if errors.As(itemErr, &netErr) {
 			// Network error (connection refused, timeout, etc.) — retry
+			lbi.log().Debug("opensearch item network error, will retry",
+				zap.Error(itemErr),
+				zap.String("index", resp.Index),
+			)
 			if lbi.metrics != nil {
 				lbi.metrics.recordTransientError(ctx, "network_error")
 			}
 			lbi.appendRetryLogError(itemErr, logs)
 		} else {
 			// Other unexpected error — permanent
+			lbi.log().Debug("opensearch item unexpected error, marking permanent",
+				zap.Error(itemErr),
+				zap.Int("status", resp.Status),
+				zap.String("index", resp.Index),
+			)
 			if lbi.metrics != nil {
 				lbi.metrics.recordPermanentError(ctx, "unknown", "permanent", 0)
 			}
@@ -269,6 +330,10 @@ func (lbi *logBulkIndexer) submitToOnError(_ context.Context, resp opensearchapi
 	}
 	doc, err := json.Marshal(envelope)
 	if err != nil {
+		lbi.log().Debug("failed to marshal on-error envelope, dropping",
+			zap.Error(err),
+			zap.String("on_error_index", lbi.onErrorIndex),
+		)
 		lbi.appendPermanentError(err)
 		return
 	}
@@ -279,6 +344,11 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 	if len(lbi.onErrorDocs) == 0 {
 		return nil
 	}
+	lbi.log().Debug("flushing documents to on-error index",
+		zap.Int("doc_count", len(lbi.onErrorDocs)),
+		zap.String("on_error_index", lbi.onErrorIndex),
+		zap.String("bulk_action", lbi.bulkAction),
+	)
 	recordFlushFailure := func() {
 		if lbi.metrics != nil {
 			lbi.metrics.recordOnErrorFlushFailure(ctx)
@@ -286,6 +356,10 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 	}
 	onErrorIndexer, err := newLogOpenSearchBulkIndexer(client, lbi.onIndexerError, lbi.pipeline)
 	if err != nil {
+		lbi.log().Debug("failed to create on-error bulk indexer",
+			zap.Error(err),
+			zap.String("on_error_index", lbi.onErrorIndex),
+		)
 		return err
 	}
 	for _, doc := range lbi.onErrorDocs {
@@ -297,17 +371,50 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 		}
 		item.OnFailure = func(_ context.Context, _ opensearchutil.BulkIndexerItem, resp opensearchapi.BulkRespItem, itemErr error) {
 			recordFlushFailure()
+			errType := "unknown"
+			errReason := "unknown"
+			if resp.Error != nil {
+				if resp.Error.Type != "" {
+					errType = resp.Error.Type
+				}
+				if resp.Error.Reason != "" {
+					errReason = resp.Error.Reason
+				}
+			}
 			if itemErr != nil {
+				lbi.log().Debug("failed to write document to on-error index (transport error), dropping",
+					zap.Error(itemErr),
+					zap.String("on_error_index", lbi.onErrorIndex),
+					zap.ByteString("document", doc),
+				)
 				lbi.appendPermanentError(itemErr)
 				return
 			}
+			lbi.log().Debug("failed to write document to on-error index (indexing error), dropping",
+				zap.Int("status", resp.Status),
+				zap.String("error_type", errType),
+				zap.String("error_reason", errReason),
+				zap.String("on_error_index", lbi.onErrorIndex),
+				zap.ByteString("document", doc),
+			)
 			lbi.appendPermanentError(responseAsError(resp))
 		}
 		if addErr := onErrorIndexer.Add(ctx, item); addErr != nil {
+			lbi.log().Debug("failed to enqueue document into on-error bulk indexer",
+				zap.Error(addErr),
+				zap.String("on_error_index", lbi.onErrorIndex),
+			)
 			lbi.appendPermanentError(addErr)
 		}
 	}
-	return onErrorIndexer.Close(ctx)
+	if closeErr := onErrorIndexer.Close(ctx); closeErr != nil {
+		lbi.log().Debug("on-error bulk indexer close returned error",
+			zap.Error(closeErr),
+			zap.String("on_error_index", lbi.onErrorIndex),
+		)
+		return closeErr
+	}
+	return nil
 }
 
 func (lbi *logBulkIndexer) newBulkIndexerItem(document []byte, indexName string) opensearchutil.BulkIndexerItem {
