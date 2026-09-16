@@ -11,6 +11,59 @@ status:
     emeritus: [Aneurysm9, MitchellGale, MaxKsyunz, YANG-DB]
     seeking_new: true
 
+attributes:
+  error_class:
+    description: The class of error
+    type: string
+  error_type:
+    description: The type of error encountered
+    type: string
+  index:
+    description: The OpenSearch index name
+    type: string
+  status:
+    description: HTTP status code
+    type: int
+
+telemetry:
+  metrics:
+    opensearch_exporter_on_error_docs:
+      enabled: true
+      stability: alpha
+      description: Number of documents routed to the on-error index due to permanent indexing failures.
+      unit: "{document}"
+      attributes: [error_class, error_type, index, status]
+      sum:
+        value_type: int
+        monotonic: true
+    opensearch_exporter_on_error_flush_failures:
+      enabled: true
+      stability: alpha
+      description: Number of failures when flushing documents to the on-error index.
+      unit: "{failure}"
+      attributes: [index]
+      sum:
+        value_type: int
+        monotonic: true
+    opensearch_exporter_permanent_errors:
+      enabled: true
+      stability: alpha
+      description: Number of documents that encountered a permanent indexing error.
+      unit: "{document}"
+      attributes: [error_class, error_type, index, status]
+      sum:
+        value_type: int
+        monotonic: true
+    opensearch_exporter_transient_errors:
+      enabled: true
+      stability: alpha
+      description: Number of documents that encountered a transient (retriable) indexing error.
+      unit: "{document}"
+      attributes: [error_type, index]
+      sum:
+        value_type: int
+        monotonic: true
+
 tests:
   expect_consumer_error: true
   config:

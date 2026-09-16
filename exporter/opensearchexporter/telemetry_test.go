@@ -10,9 +10,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/pdata/plog"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	"go.uber.org/zap"
 )
 
 // newTestMetrics returns an exporterMetrics backed by an in-memory reader
@@ -22,7 +24,10 @@ func newTestMetrics(t *testing.T) (*exporterMetrics, *sdkmetric.ManualReader) {
 	reader := sdkmetric.NewManualReader()
 	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
-	m, err := newExporterMetrics(provider)
+	settings := component.TelemetrySettings{
+		MeterProvider: provider,
+	}
+	m, err := newExporterMetrics(settings)
 	require.NoError(t, err)
 	return m, reader
 }
@@ -83,6 +88,8 @@ func TestRecordOnErrorFlushFailure(t *testing.T) {
 		total += v
 	}
 	assert.Equal(t, int64(2), total)
+	_, ok := sums["index=test"]
+	assert.True(t, ok)
 }
 
 func TestRecordPermanentError(t *testing.T) {
@@ -147,6 +154,7 @@ func TestLogBulkIndexerRecordsMetricsOnItemFailure(t *testing.T) {
 				errorClassification: nil,
 				onErrorIndex:        tt.onErrorIndex,
 				metrics:             localMetrics,
+				logger:              zap.NewNop(),
 			}
 			resp := bulkRespItemWithError(t, tt.status, tt.errType, "some reason")
 
