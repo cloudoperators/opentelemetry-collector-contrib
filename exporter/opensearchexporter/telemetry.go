@@ -67,34 +67,37 @@ func newExporterMetrics(mp metric.MeterProvider) (*exporterMetrics, error) {
 	}, nil
 }
 
-func (m *exporterMetrics) recordOnErrorDoc(ctx context.Context, errorType, errorClass string, status int) {
+func (m *exporterMetrics) recordOnErrorDoc(ctx context.Context, errorType, errorClass string, status int, index string) {
 	m.onErrorDocsTotal.Add(ctx, 1,
 		metric.WithAttributes(
 			attribute.String("error_type", errorType),
 			attribute.String("error_class", errorClass),
 			attribute.Int("status", status),
+			attribute.String("index", index),
 		),
 	)
 }
 
-func (m *exporterMetrics) recordOnErrorFlushFailure(ctx context.Context) {
+func (m *exporterMetrics) recordOnErrorFlushFailure(ctx context.Context, index string) {
 	m.onErrorFlushFailureTotal.Add(ctx, 1)
 }
 
-func (m *exporterMetrics) recordPermanentError(ctx context.Context, errorType, errorClass string, status int) {
+func (m *exporterMetrics) recordPermanentError(ctx context.Context, errorType, errorClass string, status int, index string) {
 	m.permanentErrorsTotal.Add(ctx, 1,
 		metric.WithAttributes(
 			attribute.String("error_type", errorType),
 			attribute.String("error_class", errorClass),
 			attribute.Int("status", status),
+			attribute.String("index", index),
 		),
 	)
 }
 
-func (m *exporterMetrics) recordTransientError(ctx context.Context, errorType string) {
+func (m *exporterMetrics) recordTransientError(ctx context.Context, errorType string, index string) {
 	m.transientErrorsTotal.Add(ctx, 1,
 		metric.WithAttributes(
 			attribute.String("error_type", errorType),
+			attribute.String("index", index),
 		),
 	)
 }

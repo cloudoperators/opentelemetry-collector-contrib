@@ -183,7 +183,7 @@ func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensear
 			zap.String("index", resp.Index),
 		)
 		if lbi.metrics != nil {
-			lbi.metrics.recordTransientError(ctx, errType)
+			lbi.metrics.recordTransientError(ctx, errType, resp.Index)
 		}
 		lbi.appendRetryLogError(responseAsError(resp), logs)
 
@@ -199,7 +199,7 @@ func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensear
 				zap.String("on_error_index", lbi.onErrorIndex),
 			)
 			if lbi.metrics != nil {
-				lbi.metrics.recordOnErrorDoc(ctx, errType, class, resp.Status)
+				lbi.metrics.recordOnErrorDoc(ctx, errType, class, resp.Status, resp.Index)
 			}
 			lbi.submitToOnError(ctx, resp, originalPayload)
 		} else {
@@ -211,7 +211,7 @@ func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensear
 				zap.String("index", resp.Index),
 			)
 			if lbi.metrics != nil {
-				lbi.metrics.recordPermanentError(ctx, errType, class, resp.Status)
+				lbi.metrics.recordPermanentError(ctx, errType, class, resp.Status, resp.Index)
 			}
 			lbi.appendPermanentError(responseAsError(resp))
 		}
@@ -226,7 +226,7 @@ func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensear
 				zap.String("index", resp.Index),
 			)
 			if lbi.metrics != nil {
-				lbi.metrics.recordTransientError(ctx, "network_error")
+				lbi.metrics.recordTransientError(ctx, "network_error", resp.Index)
 			}
 			lbi.appendRetryLogError(itemErr, logs)
 		} else {
@@ -237,7 +237,7 @@ func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensear
 				zap.String("index", resp.Index),
 			)
 			if lbi.metrics != nil {
-				lbi.metrics.recordPermanentError(ctx, "unknown", "permanent", 0)
+				lbi.metrics.recordPermanentError(ctx, "unknown", "permanent", 0, resp.Index)
 			}
 			lbi.appendPermanentError(itemErr)
 		}
@@ -351,7 +351,7 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 	)
 	recordFlushFailure := func() {
 		if lbi.metrics != nil {
-			lbi.metrics.recordOnErrorFlushFailure(ctx)
+			lbi.metrics.recordOnErrorFlushFailure(ctx, lbi.onErrorIndex)
 		}
 	}
 	onErrorIndexer, err := newLogOpenSearchBulkIndexer(client, lbi.onIndexerError, lbi.pipeline)
