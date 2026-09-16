@@ -5,13 +5,16 @@ package opensearchexporter
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/pdata/plog"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
-	"go.opentelemetry.io/collector/pdata/plog"
+	"go.uber.org/zap"
 )
 
 // newTestMetrics returns an exporterMetrics backed by an in-memory reader
@@ -21,7 +24,10 @@ func newTestMetrics(t *testing.T) (*exporterMetrics, *sdkmetric.ManualReader) {
 	reader := sdkmetric.NewManualReader()
 	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
-	m, err := newExporterMetrics(provider)
+	settings := component.TelemetrySettings{
+		MeterProvider: provider,
+	}
+	m, err := newExporterMetrics(settings)
 	require.NoError(t, err)
 	return m, reader
 }
@@ -59,21 +65,22 @@ func TestRecordOnErrorDoc(t *testing.T) {
 	m, reader := newTestMetrics(t)
 	ctx := context.Background()
 
-	m.recordOnErrorDoc(ctx, "mapper_parsing_exception", "permanent", 400)
-	m.recordOnErrorDoc(ctx, "mapper_parsing_exception", "permanent", 400)
-	m.recordOnErrorDoc(ctx, "illegal_argument_exception", "permanent", 400)
+	m.recordOnErrorDoc(ctx, "mapper_parsing_exception", "permanent", 400, "test")
+	m.recordOnErrorDoc(ctx, "mapper_parsing_exception", "permanent", 400, "test")
+	m.recordOnErrorDoc(ctx, "illegal_argument_exception", "permanent", 400, "test")
 
 	sums := collectInt64Sum(t, reader, "otelcol_opensearch_exporter_on_error_docs")
-	assert.Equal(t, int64(2), sums["error_class=permanent,error_type=mapper_parsing_exception,status=400"])
-	assert.Equal(t, int64(1), sums["error_class=permanent,error_type=illegal_argument_exception,status=400"])
+	fmt.Printf("sums %v", sums)
+	assert.Equal(t, int64(2), sums["error_class=permanent,error_type=mapper_parsing_exception,index=test,status=400"])
+	assert.Equal(t, int64(1), sums["error_class=permanent,error_type=illegal_argument_exception,index=test,status=400"])
 }
 
 func TestRecordOnErrorFlushFailure(t *testing.T) {
 	m, reader := newTestMetrics(t)
 	ctx := context.Background()
 
-	m.recordOnErrorFlushFailure(ctx)
-	m.recordOnErrorFlushFailure(ctx)
+	m.recordOnErrorFlushFailure(ctx, "test")
+	m.recordOnErrorFlushFailure(ctx, "test")
 
 	sums := collectInt64Sum(t, reader, "otelcol_opensearch_exporter_on_error_flush_failures")
 	total := int64(0)
@@ -81,27 +88,29 @@ func TestRecordOnErrorFlushFailure(t *testing.T) {
 		total += v
 	}
 	assert.Equal(t, int64(2), total)
+	_, ok := sums["index=test"]
+	assert.True(t, ok)
 }
 
 func TestRecordPermanentError(t *testing.T) {
 	m, reader := newTestMetrics(t)
 	ctx := context.Background()
 
-	m.recordPermanentError(ctx, "version_conflict_engine_exception", "permanent", 409)
+	m.recordPermanentError(ctx, "version_conflict_engine_exception", "permanent", 409, "test")
 
 	sums := collectInt64Sum(t, reader, "otelcol_opensearch_exporter_permanent_errors")
-	assert.Equal(t, int64(1), sums["error_class=permanent,error_type=version_conflict_engine_exception,status=409"])
+	assert.Equal(t, int64(1), sums["error_class=permanent,error_type=version_conflict_engine_exception,index=test,status=409"])
 }
 
 func TestRecordTransientError(t *testing.T) {
 	m, reader := newTestMetrics(t)
 	ctx := context.Background()
 
-	m.recordTransientError(ctx, "es_rejected_execution_exception")
-	m.recordTransientError(ctx, "es_rejected_execution_exception")
+	m.recordTransientError(ctx, "es_rejected_execution_exception", "test")
+	m.recordTransientError(ctx, "es_rejected_execution_exception", "test")
 
 	sums := collectInt64Sum(t, reader, "otelcol_opensearch_exporter_transient_errors")
-	assert.Equal(t, int64(2), sums["error_type=es_rejected_execution_exception"])
+	assert.Equal(t, int64(2), sums["error_type=es_rejected_execution_exception,index=test"])
 }
 
 func TestLogBulkIndexerRecordsMetricsOnItemFailure(t *testing.T) {
@@ -109,13 +118,13 @@ func TestLogBulkIndexerRecordsMetricsOnItemFailure(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name           string
-		status         int
-		errType        string
-		onErrorIndex   string
-		wantOnError    int64
-		wantPermanent  int64
-		wantTransient  int64
+		name          string
+		status        int
+		errType       string
+		onErrorIndex  string
+		wantOnError   int64
+		wantPermanent int64
+		wantTransient int64
 	}{
 		{
 			name:          "transient error increments transient counter",
@@ -145,6 +154,7 @@ func TestLogBulkIndexerRecordsMetricsOnItemFailure(t *testing.T) {
 				errorClassification: nil,
 				onErrorIndex:        tt.onErrorIndex,
 				metrics:             localMetrics,
+				logger:              zap.NewNop(),
 			}
 			resp := bulkRespItemWithError(t, tt.status, tt.errType, "some reason")
 

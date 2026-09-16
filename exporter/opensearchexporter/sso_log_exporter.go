@@ -47,7 +47,7 @@ func newLogExporter(cfg *Config, set exporter.Settings) (*logExporter, error) {
 		}
 	}
 
-	metrics, err := newExporterMetrics(set.TelemetrySettings.MeterProvider)
+	metrics, err := newExporterMetrics(set.TelemetrySettings)
 	if err != nil {
 		return nil, err
 	}

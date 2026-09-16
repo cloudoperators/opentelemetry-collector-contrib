@@ -185,7 +185,7 @@ func TestOpenSearchLogExporter(t *testing.T) {
 			"Permanent error",
 			"testdata/logs-sample-a.yaml",
 			[]requestHandler{
-				checkAndRespond("testdata/opensearch-response-permanent-error.json"),
+				checkAndRespond("testdata/opensearch-response-mapping-error.json"),
 			},
 			func(err error) {
 				require.True(t, consumererror.IsPermanent(err))
@@ -364,6 +364,6 @@ func TestOpenSearchLogExporterIndexOnError(t *testing.T) {
 	require.Equal(t, "mapper_parsing_exception", errBlock["type"])
 	require.Equal(t, "permanent", errBlock["class"])
 
-	_, hasOriginal := onErrorDoc["original"]
-	require.True(t, hasOriginal, "on error doc must have original field")
+	_, hasOriginal := errBlock["original_log"]
+	require.True(t, hasOriginal, "on error doc must have original_log field")
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/opensearch-project/opensearch-go/v4/opensearchapi"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
+	"go.uber.org/zap"
 )
 
 // bulkRespItemWithError builds a BulkRespItem with the given status and error fields.
@@ -70,7 +71,7 @@ func TestProcessItemFailure(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lbi := &logBulkIndexer{errs: make([]error, tt.initialErrs)}
+			lbi := &logBulkIndexer{errs: make([]error, tt.initialErrs), logger: zap.NewNop()}
 			resp := opensearchapi.BulkRespItem{Status: tt.status}
 			logs := plog.NewLogs()
 			rs := logs.ResourceLogs().AppendEmpty()
@@ -86,46 +87,46 @@ func TestProcessItemFailure(t *testing.T) {
 
 func TestProcessItemFailureStampsAttributes(t *testing.T) {
 	tests := []struct {
-		name                 string
-		status               int
-		errType              string
-		errReason            string
-		expectType           string
-		expectReason         string
-		expectStatus         int64
-		expectClassification string
-		expectAttrsSet       bool
+		name           string
+		status         int
+		errType        string
+		errReason      string
+		expectType     string
+		expectReason   string
+		expectStatus   int64
+		expectClass    string
+		expectAttrsSet bool
 	}{
 		{
-			name:                 "permanent mapping error stamps all attrs",
-			status:               400,
-			errType:              "mapper_parsing_exception",
-			errReason:            "failed to parse field",
-			expectType:           "mapper_parsing_exception",
-			expectReason:         "failed to parse field",
-			expectStatus:         400,
-			expectClassification: "permanent",
-			expectAttrsSet:       true,
+			name:           "permanent mapping error stamps all attrs",
+			status:         400,
+			errType:        "mapper_parsing_exception",
+			errReason:      "failed to parse field",
+			expectType:     "mapper_parsing_exception",
+			expectReason:   "failed to parse field",
+			expectStatus:   400,
+			expectClass:    "permanent",
+			expectAttrsSet: true,
 		},
 		{
-			name:                 "retryable 503 classified transient",
-			status:               503,
-			errType:              "es_rejected_execution_exception",
-			errReason:            "queue capacity exceeded",
-			expectType:           "es_rejected_execution_exception",
-			expectReason:         "queue capacity exceeded",
-			expectStatus:         503,
-			expectClassification: "transient",
-			expectAttrsSet:       true,
+			name:           "retryable 503 classified transient",
+			status:         503,
+			errType:        "es_rejected_execution_exception",
+			errReason:      "queue capacity exceeded",
+			expectType:     "es_rejected_execution_exception",
+			expectReason:   "queue capacity exceeded",
+			expectStatus:   503,
+			expectClass:    "transient",
+			expectAttrsSet: true,
 		},
 		{
-			name:                 "status without resp.Error stamps unknown fields",
-			status:               500,
-			expectType:           "unknown",
-			expectReason:         "unknown",
-			expectStatus:         500,
-			expectClassification: "transient",
-			expectAttrsSet:       true,
+			name:           "status without resp.Error stamps unknown fields",
+			status:         500,
+			expectType:     "unknown",
+			expectReason:   "unknown",
+			expectStatus:   500,
+			expectClass:    "transient",
+			expectAttrsSet: true,
 		},
 		{
 			name:           "no status and no resp.Error stamps nothing",
@@ -136,7 +137,7 @@ func TestProcessItemFailureStampsAttributes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lbi := &logBulkIndexer{}
+			lbi := &logBulkIndexer{logger: zap.NewNop()}
 			resp := bulkRespItemWithError(t, tt.status, tt.errType, tt.errReason)
 			logs := plog.NewLogs()
 			rs := logs.ResourceLogs().AppendEmpty()
@@ -162,8 +163,8 @@ func TestProcessItemFailureStampsAttributes(t *testing.T) {
 			if v, ok := attrs.Get("opensearch.error.status"); !ok || v.Int() != tt.expectStatus {
 				t.Errorf("expected opensearch.error.status=%d, got ok=%v value=%d", tt.expectStatus, ok, v.Int())
 			}
-			if v, ok := attrs.Get("opensearch.error.class"); !ok || v.AsString() != tt.expectClassification {
-				t.Errorf("expected opensearch.error.class=%q, got ok=%v value=%q", tt.expectClassification, ok, v.AsString())
+			if v, ok := attrs.Get("opensearch.error.class"); !ok || v.AsString() != tt.expectClass {
+				t.Errorf("expected opensearch.error.class=%q, got ok=%v value=%q", tt.expectClass, ok, v.AsString())
 			}
 		})
 	}
@@ -174,7 +175,7 @@ func TestProcessItemFailureUsesUserClassification(t *testing.T) {
 		Permanent: []string{"custom_permanent_error"},
 		Transient: []string{"custom_transient_error"},
 	}
-	lbi := &logBulkIndexer{errorClassification: cfg}
+	lbi := &logBulkIndexer{errorClassification: cfg, logger: zap.NewNop()}
 	// 500 status normally transient, but user override marks it permanent
 	resp := bulkRespItemWithError(t, 500, "custom_permanent_error", "")
 	logs := plog.NewLogs()
@@ -201,7 +202,7 @@ func TestNewLogBulkIndexerWithPipeline(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lbi := newLogBulkIndexer("create", nil, tt.pipeline, nil, "", nil, nil)
+			lbi := newLogBulkIndexer("create", nil, tt.pipeline, nil, "", nil, zap.NewNop())
 			if lbi.pipeline != tt.pipeline {
 				t.Errorf("expected pipeline %q, got %q", tt.pipeline, lbi.pipeline)
 			}
