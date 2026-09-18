@@ -28,6 +28,7 @@ The following settings are optional:
 - `auth.authenticator`: Specifies the component ID to use to authenticate requests to Azure API. Use [azureauth extension](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/extension/azureauthextension).
 - `credentials` (Deprecated since [v0.129.0]: use `auth` instead)(default = service_principal): Specifies the used authentication method. Supported values are `service_principal`, `workload_identity`, `managed_identity`, `default_credentials`.
 - `resource_groups` (default = none): Filter metrics for specific resource groups, not setting a value will scrape metrics for all resources in the subscription.
+- `resource_tags` (default = none): Filter metrics based on Azure resource tags. Each entry specifies a tag `name` and optionally a `value`. When `value` is omitted, the resource only needs to have the specified tag.
 - `services` (default = none): Filter metrics for specific services, not setting a value will scrape metrics for all services integrated with Azure Monitor.
 - `metrics` (default = none): Filter metrics by name and aggregations. Not setting a value will scrape all metrics and their aggregations.
 - `cache_resources` (default = 86400): List of resources will be cached for the provided amount of time in seconds.
@@ -71,6 +72,11 @@ It accepts a nested map where
     In this case, the scraper will fetch **all supported aggregations** for that metric, which is also the case if no
     `metrics` configuration is provided.
 > - **Case Insensitive**: The letter case of the Namespaces, Metric names, and Aggregations does not affect the functionality.
+> - **Custom metric namespaces**: Metrics published by the [Azure Monitor Agent (AMA)](https://learn.microsoft.com/en-us/azure/azure-monitor/agents/azure-monitor-agent-overview)
+    or MetricsExtension (e.g. guest OS metrics under `azure.vm.linux.guestmetrics`) belong to a custom namespace that
+    the MetricDefinitions API only returns when queried with an explicit `metricnamespace` filter. To collect these
+    metrics, add the custom namespace as a top-level key under `metrics`; the receiver will issue the necessary
+    namespace-filtered discovery call automatically.
 
 > [!WARNING]  
 > If you started providing a `metrics` configuration for a namespace, you have to specify all the metrics and their 
@@ -91,6 +97,30 @@ receivers:
         IncomingMessages: [total]     # metric IncomingMessages with aggregation "Total"
         NamespaceCpuUsage: [*]        # metric NamespaceCpuUsage with all known aggregations
         ActiveConnections: []         # metric ActiveConnections with all known aggregations (same effect than [*])
+```
+
+Filtering resources by tags:
+
+```yaml
+receivers:
+  azure_monitor:
+    resource_tags:
+      - name: environment
+        value: production
+      - name: team
+```
+
+The receiver will only scrape resources that have both the `environment=production` and `team` tags.
+Scraping guest OS metrics from a custom namespace (e.g. published by Azure Monitor Agent):
+
+```yaml
+receivers:
+  azure_monitor:
+    services:
+      - Microsoft.Compute/virtualMachines
+    metrics:
+      "azure.vm.linux.guestmetrics":
+        "filesystem % free space": [Average]  # metric names depend on agent config; check MetricDefinitions API for your namespace
 ```
 
 ### Use Batch API (experimental)
@@ -248,6 +278,8 @@ conditions: always
 cardinality:
   - if use_batch_api is false, once per res id and *page of metrics def
   - if use_batch_api is true, once per res type and *page of metrics def
+  - one additional call per custom namespace configured under `metrics` that
+    was not returned by the default call (e.g. azure.vm.linux.guestmetrics)
 ```
 
 ### [Metrics - List](https://learn.microsoft.com/en-us/rest/api/monitor/metrics/list?view=rest-monitor-2023-10-01&tabs=HTTP)

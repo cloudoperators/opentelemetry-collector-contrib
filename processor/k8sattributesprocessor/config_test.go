@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/confmap"
 	"go.opentelemetry.io/collector/confmap/confmaptest"
-	"go.opentelemetry.io/collector/confmap/xconfmap"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/k8sconfig"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/processor/k8sattributesprocessor/internal/kube"
@@ -30,11 +30,11 @@ func TestLoadConfig(t *testing.T) {
 				APIConfig: k8sconfig.APIConfig{AuthType: k8sconfig.AuthTypeServiceAccount},
 				Exclude:   ExcludeConfig{Pods: []ExcludePodConfig{{Name: "jaeger-agent"}, {Name: "jaeger-collector"}}},
 				Extract: ExtractConfig{
-					Metadata:                     enabledAttributes(),
-					DeploymentNameFromReplicaSet: false,
+					Metadata: enabledAttributes(),
 				},
 				WaitForMetadataTimeout: 10 * time.Second,
 				WatchSyncPeriod:        5 * time.Minute,
+				PodDeleteGracePeriod:   120 * time.Second,
 			},
 		},
 		{
@@ -52,7 +52,6 @@ func TestLoadConfig(t *testing.T) {
 						{TagName: "l1", Key: "label1", From: "pod"},
 						{TagName: "l2", Key: "label2", From: kube.MetadataFromPod},
 					},
-					DeploymentNameFromReplicaSet: false,
 				},
 				Filter: FilterConfig{
 					Namespace:      "ns2",
@@ -109,6 +108,7 @@ func TestLoadConfig(t *testing.T) {
 				},
 				WaitForMetadataTimeout: 10 * time.Second,
 				WatchSyncPeriod:        5 * time.Minute,
+				PodDeleteGracePeriod:   120 * time.Second,
 			},
 		},
 		{
@@ -123,8 +123,7 @@ func TestLoadConfig(t *testing.T) {
 					Labels: []FieldExtractConfig{
 						{KeyRegex: "opentel.*", From: kube.MetadataFromPod},
 					},
-					Metadata:                     enabledAttributes(),
-					DeploymentNameFromReplicaSet: false,
+					Metadata: enabledAttributes(),
 				},
 				Exclude: ExcludeConfig{
 					Pods: []ExcludePodConfig{
@@ -134,23 +133,43 @@ func TestLoadConfig(t *testing.T) {
 				},
 				WaitForMetadataTimeout: 10 * time.Second,
 				WatchSyncPeriod:        5 * time.Minute,
-			},
-		},
-		{
-			id: component.NewIDWithName(metadata.Type, "deployment_name_from_replicaset"),
-			expected: &Config{
-				APIConfig: k8sconfig.APIConfig{AuthType: k8sconfig.AuthTypeServiceAccount},
-				Extract: ExtractConfig{
-					Metadata:                     enabledAttributes(),
-					DeploymentNameFromReplicaSet: true,
-				},
-				Exclude:                defaultExcludes,
-				WaitForMetadataTimeout: 10 * time.Second,
-				WatchSyncPeriod:        5 * time.Minute,
+				PodDeleteGracePeriod:   120 * time.Second,
 			},
 		},
 		{
 			id: component.NewIDWithName(metadata.Type, "too_many_sources"),
+		},
+		{
+			id: component.NewIDWithName(metadata.Type, "duplicate_association_single_source"),
+		},
+		{
+			id: component.NewIDWithName(metadata.Type, "duplicate_association_reordered_sources"),
+		},
+		{
+			id: component.NewIDWithName(metadata.Type, "distinct_associations"),
+			expected: &Config{
+				APIConfig: k8sconfig.APIConfig{AuthType: k8sconfig.AuthTypeServiceAccount},
+				Extract: ExtractConfig{
+					Metadata: enabledAttributes(),
+				},
+				Association: []PodAssociationConfig{
+					{
+						Sources: []PodAssociationSourceConfig{
+							{From: "resource_attribute", Name: "k8s.pod.uid"},
+							{From: "resource_attribute", Name: "container.id"},
+						},
+					},
+					{
+						Sources: []PodAssociationSourceConfig{
+							{From: "resource_attribute", Name: "k8s.pod.uid"},
+						},
+					},
+				},
+				Exclude:                defaultExcludes,
+				WaitForMetadataTimeout: 10 * time.Second,
+				WatchSyncPeriod:        5 * time.Minute,
+				PodDeleteGracePeriod:   120 * time.Second,
+			},
 		},
 		{
 			id: component.NewIDWithName(metadata.Type, "bad_keys_labels"),
@@ -181,13 +200,13 @@ func TestLoadConfig(t *testing.T) {
 			expected: &Config{
 				APIConfig: k8sconfig.APIConfig{AuthType: k8sconfig.AuthTypeServiceAccount},
 				Extract: ExtractConfig{
-					Metadata:                     enabledAttributes(),
-					OtelAnnotations:              true,
-					DeploymentNameFromReplicaSet: false,
+					Metadata:        enabledAttributes(),
+					OtelAnnotations: true,
 				},
 				Exclude:                defaultExcludes,
 				WaitForMetadataTimeout: 10 * time.Second,
 				WatchSyncPeriod:        5 * time.Minute,
+				PodDeleteGracePeriod:   120 * time.Second,
 			},
 		},
 		{
@@ -195,13 +214,13 @@ func TestLoadConfig(t *testing.T) {
 			expected: &Config{
 				APIConfig: k8sconfig.APIConfig{AuthType: k8sconfig.AuthTypeServiceAccount},
 				Extract: ExtractConfig{
-					Metadata:                     enabledAttributes(),
-					DeploymentNameFromReplicaSet: false,
+					Metadata: enabledAttributes(),
 				},
 				Exclude:                defaultExcludes,
 				WaitForMetadata:        true,
 				WaitForMetadataTimeout: 30 * time.Second,
 				WatchSyncPeriod:        5 * time.Minute,
+				PodDeleteGracePeriod:   120 * time.Second,
 			},
 		},
 		{
@@ -210,12 +229,12 @@ func TestLoadConfig(t *testing.T) {
 				APIConfig:   k8sconfig.APIConfig{AuthType: k8sconfig.AuthTypeServiceAccount},
 				Passthrough: true,
 				Extract: ExtractConfig{
-					Metadata:                     enabledAttributes(),
-					DeploymentNameFromReplicaSet: false,
+					Metadata: enabledAttributes(),
 				},
 				Exclude:                defaultExcludes,
 				WaitForMetadataTimeout: 10 * time.Second,
 				WatchSyncPeriod:        5 * time.Minute,
+				PodDeleteGracePeriod:   120 * time.Second,
 			},
 		},
 		{
@@ -223,8 +242,7 @@ func TestLoadConfig(t *testing.T) {
 			expected: &Config{
 				APIConfig: k8sconfig.APIConfig{AuthType: k8sconfig.AuthTypeServiceAccount},
 				Extract: ExtractConfig{
-					Metadata:                     enabledAttributes(),
-					DeploymentNameFromReplicaSet: false,
+					Metadata: enabledAttributes(),
 				},
 				Filter: FilterConfig{
 					Labels: []FieldFilterConfig{
@@ -234,6 +252,7 @@ func TestLoadConfig(t *testing.T) {
 				Exclude:                defaultExcludes,
 				WaitForMetadataTimeout: 10 * time.Second,
 				WatchSyncPeriod:        5 * time.Minute,
+				PodDeleteGracePeriod:   120 * time.Second,
 			},
 		},
 		{
@@ -241,8 +260,7 @@ func TestLoadConfig(t *testing.T) {
 			expected: &Config{
 				APIConfig: k8sconfig.APIConfig{AuthType: k8sconfig.AuthTypeServiceAccount},
 				Extract: ExtractConfig{
-					Metadata:                     enabledAttributes(),
-					DeploymentNameFromReplicaSet: false,
+					Metadata: enabledAttributes(),
 				},
 				Filter: FilterConfig{
 					Labels: []FieldFilterConfig{
@@ -252,6 +270,7 @@ func TestLoadConfig(t *testing.T) {
 				Exclude:                defaultExcludes,
 				WaitForMetadataTimeout: 10 * time.Second,
 				WatchSyncPeriod:        5 * time.Minute,
+				PodDeleteGracePeriod:   120 * time.Second,
 			},
 		},
 		{
@@ -266,11 +285,11 @@ func TestLoadConfig(t *testing.T) {
 					Annotations: []FieldExtractConfig{
 						{TagName: "ns_annotation", Key: "owner", From: "namespace"},
 					},
-					DeploymentNameFromReplicaSet: false,
 				},
 				Exclude:                defaultExcludes,
 				WaitForMetadataTimeout: 10 * time.Second,
 				WatchSyncPeriod:        5 * time.Minute,
+				PodDeleteGracePeriod:   120 * time.Second,
 			},
 		},
 		{
@@ -282,11 +301,11 @@ func TestLoadConfig(t *testing.T) {
 					Labels: []FieldExtractConfig{
 						{TagName: "node_label", Key: "node-role", From: "node"},
 					},
-					DeploymentNameFromReplicaSet: false,
 				},
 				Exclude:                defaultExcludes,
 				WaitForMetadataTimeout: 10 * time.Second,
 				WatchSyncPeriod:        5 * time.Minute,
+				PodDeleteGracePeriod:   120 * time.Second,
 			},
 		},
 		{
@@ -298,11 +317,27 @@ func TestLoadConfig(t *testing.T) {
 					Labels: []FieldExtractConfig{
 						{TagName: "deployment_label", Key: "app", From: "deployment"},
 					},
-					DeploymentNameFromReplicaSet: false,
 				},
 				Exclude:                defaultExcludes,
 				WaitForMetadataTimeout: 10 * time.Second,
 				WatchSyncPeriod:        5 * time.Minute,
+				PodDeleteGracePeriod:   120 * time.Second,
+			},
+		},
+		{
+			id: component.NewIDWithName(metadata.Type, "extract_from_replicaset"),
+			expected: &Config{
+				APIConfig: k8sconfig.APIConfig{AuthType: k8sconfig.AuthTypeServiceAccount},
+				Extract: ExtractConfig{
+					Metadata: enabledAttributes(),
+					Labels: []FieldExtractConfig{
+						{TagName: "replicaset_label", Key: "app", From: "replicaset"},
+					},
+				},
+				Exclude:                defaultExcludes,
+				WaitForMetadataTimeout: 10 * time.Second,
+				WatchSyncPeriod:        5 * time.Minute,
+				PodDeleteGracePeriod:   120 * time.Second,
 			},
 		},
 		{
@@ -314,11 +349,11 @@ func TestLoadConfig(t *testing.T) {
 					Labels: []FieldExtractConfig{
 						{TagName: "statefulset_label", Key: "app", From: "statefulset"},
 					},
-					DeploymentNameFromReplicaSet: false,
 				},
 				Exclude:                defaultExcludes,
 				WaitForMetadataTimeout: 10 * time.Second,
 				WatchSyncPeriod:        5 * time.Minute,
+				PodDeleteGracePeriod:   120 * time.Second,
 			},
 		},
 		{
@@ -330,11 +365,11 @@ func TestLoadConfig(t *testing.T) {
 					Labels: []FieldExtractConfig{
 						{TagName: "daemonset_label", Key: "app", From: "daemonset"},
 					},
-					DeploymentNameFromReplicaSet: false,
 				},
 				Exclude:                defaultExcludes,
 				WaitForMetadataTimeout: 10 * time.Second,
 				WatchSyncPeriod:        5 * time.Minute,
+				PodDeleteGracePeriod:   120 * time.Second,
 			},
 		},
 		{
@@ -346,11 +381,27 @@ func TestLoadConfig(t *testing.T) {
 					Labels: []FieldExtractConfig{
 						{TagName: "job_label", Key: "app", From: "job"},
 					},
-					DeploymentNameFromReplicaSet: false,
 				},
 				Exclude:                defaultExcludes,
 				WaitForMetadataTimeout: 10 * time.Second,
 				WatchSyncPeriod:        5 * time.Minute,
+				PodDeleteGracePeriod:   120 * time.Second,
+			},
+		},
+		{
+			id: component.NewIDWithName(metadata.Type, "extract_from_cronjob"),
+			expected: &Config{
+				APIConfig: k8sconfig.APIConfig{AuthType: k8sconfig.AuthTypeServiceAccount},
+				Extract: ExtractConfig{
+					Metadata: enabledAttributes(),
+					Labels: []FieldExtractConfig{
+						{TagName: "cronjob_label", Key: "app", From: "cronjob"},
+					},
+				},
+				Exclude:                defaultExcludes,
+				WaitForMetadataTimeout: 10 * time.Second,
+				WatchSyncPeriod:        5 * time.Minute,
+				PodDeleteGracePeriod:   120 * time.Second,
 			},
 		},
 		{
@@ -368,11 +419,11 @@ func TestLoadConfig(t *testing.T) {
 						"container.image.repo_digests", "service.namespace", "service.name",
 						"service.version", "service.instance.id", "k8s.cluster.uid",
 					},
-					DeploymentNameFromReplicaSet: false,
 				},
 				Exclude:                defaultExcludes,
 				WaitForMetadataTimeout: 10 * time.Second,
 				WatchSyncPeriod:        5 * time.Minute,
+				PodDeleteGracePeriod:   120 * time.Second,
 			},
 		},
 		{
@@ -387,6 +438,7 @@ func TestLoadConfig(t *testing.T) {
 				Exclude:                defaultExcludes,
 				WaitForMetadataTimeout: 10 * time.Second,
 				WatchSyncPeriod:        5 * time.Minute,
+				PodDeleteGracePeriod:   120 * time.Second,
 			},
 		},
 		{
@@ -402,6 +454,7 @@ func TestLoadConfig(t *testing.T) {
 				Exclude:                defaultExcludes,
 				WaitForMetadataTimeout: 10 * time.Second,
 				WatchSyncPeriod:        20 * time.Second,
+				PodDeleteGracePeriod:   30 * time.Second,
 			},
 		},
 		{
@@ -417,7 +470,11 @@ func TestLoadConfig(t *testing.T) {
 				Exclude:                defaultExcludes,
 				WaitForMetadataTimeout: 10 * time.Second,
 				WatchSyncPeriod:        0,
+				PodDeleteGracePeriod:   120 * time.Second,
 			},
+		},
+		{
+			id: component.NewIDWithName(metadata.Type, "bad_pod_delete_grace_period"),
 		},
 	}
 
@@ -436,13 +493,140 @@ func TestLoadConfig(t *testing.T) {
 			// Set "K8S_NODE" to pass validation.
 			t.Setenv("K8S_NODE", "ip-111.us-west-2.compute.internal")
 			if tt.expected == nil {
-				err = xconfmap.Validate(cfg)
+				err = confmap.Validate(cfg)
 				assert.Error(t, err)
 				return
 			}
 
-			assert.NoError(t, xconfmap.Validate(cfg))
+			assert.NoError(t, confmap.Validate(cfg))
 			assert.Equal(t, tt.expected, cfg)
+		})
+	}
+}
+
+func TestConfigValidateDuplicatePodAssociations(t *testing.T) {
+	newSource := func(from, name string) PodAssociationSourceConfig {
+		return PodAssociationSourceConfig{From: from, Name: name}
+	}
+
+	tests := []struct {
+		name        string
+		association []PodAssociationConfig
+		wantErr     bool
+	}{
+		{
+			name: "identical single source",
+			association: []PodAssociationConfig{
+				{Sources: []PodAssociationSourceConfig{newSource("resource_attribute", "container.id")}},
+				{Sources: []PodAssociationSourceConfig{newSource("resource_attribute", "container.id")}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "same multi-source set in different order",
+			association: []PodAssociationConfig{
+				{Sources: []PodAssociationSourceConfig{
+					newSource("resource_attribute", "k8s.pod.uid"),
+					newSource("resource_attribute", "container.id"),
+				}},
+				{Sources: []PodAssociationSourceConfig{
+					newSource("resource_attribute", "container.id"),
+					newSource("resource_attribute", "k8s.pod.uid"),
+				}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "differ by one source",
+			association: []PodAssociationConfig{
+				{Sources: []PodAssociationSourceConfig{
+					newSource("resource_attribute", "k8s.pod.uid"),
+					newSource("resource_attribute", "container.id"),
+				}},
+				{Sources: []PodAssociationSourceConfig{
+					newSource("resource_attribute", "k8s.pod.uid"),
+				}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "same name different source type",
+			association: []PodAssociationConfig{
+				{Sources: []PodAssociationSourceConfig{newSource("resource_attribute", "ip")}},
+				{Sources: []PodAssociationSourceConfig{newSource("connection", "ip")}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "single valid association",
+			association: []PodAssociationConfig{
+				{Sources: []PodAssociationSourceConfig{newSource("resource_attribute", "k8s.pod.ip")}},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				APIConfig:   k8sconfig.APIConfig{AuthType: k8sconfig.AuthTypeServiceAccount},
+				Association: tt.association,
+			}
+			err := cfg.Validate()
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestConfigValidateExcludePodNameRegex(t *testing.T) {
+	tests := []struct {
+		name    string
+		pods    []ExcludePodConfig
+		wantErr bool
+	}{
+		{
+			name:    "no excludes",
+			pods:    nil,
+			wantErr: false,
+		},
+		{
+			name:    "valid pattern",
+			pods:    []ExcludePodConfig{{Name: "jaeger-agent"}},
+			wantErr: false,
+		},
+		{
+			name:    "valid pattern with metacharacters",
+			pods:    []ExcludePodConfig{{Name: `^kube-(proxy|dns)-.*$`}},
+			wantErr: false,
+		},
+		{
+			name:    "unterminated character class",
+			pods:    []ExcludePodConfig{{Name: "[unclosed"}},
+			wantErr: true,
+		},
+		{
+			name:    "invalid pattern among valid ones",
+			pods:    []ExcludePodConfig{{Name: "jaeger-agent"}, {Name: "*invalid"}},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				APIConfig: k8sconfig.APIConfig{AuthType: k8sconfig.AuthTypeServiceAccount},
+				Exclude:   ExcludeConfig{Pods: tt.pods},
+			}
+			err := cfg.Validate()
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
 		})
 	}
 }
@@ -454,5 +638,5 @@ func TestFilterConfigInvalidEnvVar(t *testing.T) {
 		Labels:         []FieldFilterConfig{},
 		Fields:         []FieldFilterConfig{},
 	}
-	assert.Error(t, xconfmap.Validate(f))
+	assert.Error(t, confmap.Validate(f))
 }

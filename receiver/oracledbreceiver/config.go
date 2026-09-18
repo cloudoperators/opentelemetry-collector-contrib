@@ -27,33 +27,58 @@ var (
 	errEmptyUsername       = errors.New("username must be set")
 	errMaxQuerySampleCount = errors.New("`max_query_sample_count` must be between 1 and 10000")
 	errTopQueryCount       = errors.New("`top_query_count` must be between 1 and 200 and less than or equal to `max_query_sample_count`")
+
+	errMaxProcedureSampleCount = errors.New("`max_procedure_sample_count` must be between 1 and 10000")
+	// Ceiling is higher than top_query_count: a database has far fewer program units than cached statements.
+	errTopProcedureCount = errors.New("`top_procedure_count` must be between 1 and 1000 and less than or equal to `max_procedure_sample_count`")
 )
 
 type TopQueryCollection struct {
 	MaxQuerySampleCount uint          `mapstructure:"max_query_sample_count"`
 	TopQueryCount       uint          `mapstructure:"top_query_count"`
 	CollectionInterval  time.Duration `mapstructure:"collection_interval"`
+	AllowedCommentKeys  []string      `mapstructure:"allowed_comment_keys"`
 }
 
 type QuerySample struct {
+	MaxRowsPerQuery    uint64   `mapstructure:"max_rows_per_query"`
+	AllowedCommentKeys []string `mapstructure:"allowed_comment_keys"`
+
+	// prevent unkeyed literal initialization
+	_ struct{}
+}
+
+type SessionWaitEvent struct {
 	MaxRowsPerQuery uint64 `mapstructure:"max_rows_per_query"`
 
 	// prevent unkeyed literal initialization
 	_ struct{}
 }
 
-type Config struct {
-	DataSource                     string `mapstructure:"datasource"`
-	Endpoint                       string `mapstructure:"endpoint"`
-	Password                       string `mapstructure:"password"`
-	Service                        string `mapstructure:"service"`
-	Username                       string `mapstructure:"username"`
-	scraperhelper.ControllerConfig `mapstructure:",squash"`
-	metadata.MetricsBuilderConfig  `mapstructure:",squash"`
-	metadata.LogsBuilderConfig     `mapstructure:",squash"`
+type ProcedureMetrics struct {
+	// MaxProcedureSampleCount is the fetch limit; ranking happens over deltas, so it must exceed TopProcedureCount.
+	MaxProcedureSampleCount uint          `mapstructure:"max_procedure_sample_count"`
+	TopProcedureCount       uint          `mapstructure:"top_procedure_count"`
+	CollectionInterval      time.Duration `mapstructure:"collection_interval"`
 
-	TopQueryCollection `mapstructure:"top_query_collection"`
-	QuerySample        `mapstructure:"query_sample_collection"`
+	// prevent unkeyed literal initialization
+	_ struct{}
+}
+
+type Config struct {
+	DataSource           string                         `mapstructure:"datasource"`
+	Endpoint             string                         `mapstructure:"endpoint"`
+	Password             string                         `mapstructure:"password"`
+	Service              string                         `mapstructure:"service"`
+	Username             string                         `mapstructure:"username"`
+	ControllerConfig     scraperhelper.ControllerConfig `mapstructure:",squash"`
+	MetricsBuilderConfig metadata.MetricsBuilderConfig  `mapstructure:",squash"`
+	LogsBuilderConfig    metadata.LogsBuilderConfig     `mapstructure:",squash"`
+
+	TopQueryCollection TopQueryCollection `mapstructure:"top_query_collection"`
+	QuerySample        QuerySample        `mapstructure:"query_sample_collection"`
+	SessionWaitEvent   SessionWaitEvent   `mapstructure:"session_wait_event_collection"`
+	ProcedureMetrics   ProcedureMetrics   `mapstructure:"top_procedure_collection"`
 }
 
 func (c Config) Validate() error {
@@ -100,11 +125,21 @@ func (c Config) Validate() error {
 		}
 	}
 
-	if c.MaxQuerySampleCount < 1 || c.MaxQuerySampleCount > 10000 {
+	if c.TopQueryCollection.MaxQuerySampleCount < 1 || c.TopQueryCollection.MaxQuerySampleCount > 10000 {
 		allErrs = multierr.Append(allErrs, errMaxQuerySampleCount)
 	}
-	if c.TopQueryCount < 1 || c.TopQueryCount > 200 || c.TopQueryCount > c.MaxQuerySampleCount {
+	if c.TopQueryCollection.TopQueryCount < 1 || c.TopQueryCollection.TopQueryCount > 200 || c.TopQueryCollection.TopQueryCount > c.TopQueryCollection.MaxQuerySampleCount {
 		allErrs = multierr.Append(allErrs, errTopQueryCount)
+	}
+	// Only validated when enabled, so a deployment that never turns it on is not held to unused bounds.
+	if c.LogsBuilderConfig.Events.DbServerTopProcedure.Enabled {
+		if c.ProcedureMetrics.MaxProcedureSampleCount < 1 || c.ProcedureMetrics.MaxProcedureSampleCount > 10000 {
+			allErrs = multierr.Append(allErrs, errMaxProcedureSampleCount)
+		}
+		if c.ProcedureMetrics.TopProcedureCount < 1 || c.ProcedureMetrics.TopProcedureCount > 1000 ||
+			c.ProcedureMetrics.TopProcedureCount > c.ProcedureMetrics.MaxProcedureSampleCount {
+			allErrs = multierr.Append(allErrs, errTopProcedureCount)
+		}
 	}
 	return allErrs
 }

@@ -46,13 +46,13 @@ func TestExtension(t *testing.T) {
 		{
 			name: "No additional headers",
 			config: func(listenAt string) *Config {
+				ingressConfig := confighttp.NewDefaultServerConfig()
+				ingressConfig.NetAddr = confignet.AddrConfig{
+					Transport: "tcp",
+					Endpoint:  listenAt,
+				}
 				return &Config{
-					Ingress: confighttp.ServerConfig{
-						NetAddr: confignet.AddrConfig{
-							Transport: "tcp",
-							Endpoint:  listenAt,
-						},
-					},
+					Ingress: ingressConfig,
 				}
 			},
 			expectedbackendStatusCode:   http.StatusAccepted,
@@ -74,18 +74,18 @@ func TestExtension(t *testing.T) {
 		{
 			name: "With additional headers",
 			config: func(listenAt string) *Config {
+				ingressConfig := confighttp.NewDefaultServerConfig()
+				ingressConfig.NetAddr = confignet.AddrConfig{
+					Transport: "tcp",
+					Endpoint:  listenAt,
+				}
+				egressConfig := confighttp.NewDefaultClientConfig()
+				egressConfig.Headers = configopaque.MapList{
+					{Name: "key", Value: "value"},
+				}
 				return &Config{
-					Ingress: confighttp.ServerConfig{
-						NetAddr: confignet.AddrConfig{
-							Transport: "tcp",
-							Endpoint:  listenAt,
-						},
-					},
-					Egress: confighttp.ClientConfig{
-						Headers: configopaque.MapList{
-							{Name: "key", Value: "value"},
-						},
-					},
+					Ingress: ingressConfig,
+					Egress:  egressConfig,
 				}
 			},
 			expectedbackendStatusCode:   http.StatusAccepted,
@@ -103,18 +103,18 @@ func TestExtension(t *testing.T) {
 		{
 			name: "Error code from backend",
 			config: func(listenAt string) *Config {
+				ingressConfig := confighttp.NewDefaultServerConfig()
+				ingressConfig.NetAddr = confignet.AddrConfig{
+					Transport: "tcp",
+					Endpoint:  listenAt,
+				}
+				egressConfig := confighttp.NewDefaultClientConfig()
+				egressConfig.Headers = configopaque.MapList{
+					{Name: "key", Value: "value"},
+				}
 				return &Config{
-					Ingress: confighttp.ServerConfig{
-						NetAddr: confignet.AddrConfig{
-							Transport: "tcp",
-							Endpoint:  listenAt,
-						},
-					},
-					Egress: confighttp.ClientConfig{
-						Headers: configopaque.MapList{
-							{Name: "key", Value: "value"},
-						},
-					},
+					Ingress: ingressConfig,
+					Egress:  egressConfig,
 				}
 			},
 			expectedbackendStatusCode:   http.StatusInternalServerError,
@@ -130,18 +130,18 @@ func TestExtension(t *testing.T) {
 		{
 			name: "Error making request at forwarder",
 			config: func(listenAt string) *Config {
+				ingressConfig := confighttp.NewDefaultServerConfig()
+				ingressConfig.NetAddr = confignet.AddrConfig{
+					Transport: "tcp",
+					Endpoint:  listenAt,
+				}
+				egressConfig := confighttp.NewDefaultClientConfig()
+				egressConfig.Headers = configopaque.MapList{
+					{Name: "key", Value: "value"},
+				}
 				return &Config{
-					Ingress: confighttp.ServerConfig{
-						NetAddr: confignet.AddrConfig{
-							Transport: "tcp",
-							Endpoint:  listenAt,
-						},
-					},
-					Egress: confighttp.ClientConfig{
-						Headers: configopaque.MapList{
-							{Name: "key", Value: "value"},
-						},
-					},
+					Ingress: ingressConfig,
+					Egress:  egressConfig,
 				}
 			},
 			expectedbackendStatusCode:   http.StatusBadGateway,
@@ -157,21 +157,21 @@ func TestExtension(t *testing.T) {
 		{
 			name: "Invalid config - HTTP Client creation fails",
 			config: func(listenAt string) *Config {
+				ingressConfig := confighttp.NewDefaultServerConfig()
+				ingressConfig.NetAddr = confignet.AddrConfig{
+					Transport: "tcp",
+					Endpoint:  listenAt,
+				}
+				egressConfig := confighttp.NewDefaultClientConfig()
+				egressConfig.Endpoint = "localhost:9090"
+				egressConfig.TLS = configtls.ClientConfig{
+					Config: configtls.Config{
+						CAFile: "/non/existent",
+					},
+				}
 				return &Config{
-					Ingress: confighttp.ServerConfig{
-						NetAddr: confignet.AddrConfig{
-							Transport: "tcp",
-							Endpoint:  listenAt,
-						},
-					},
-					Egress: confighttp.ClientConfig{
-						Endpoint: "localhost:9090",
-						TLS: configtls.ClientConfig{
-							Config: configtls.Config{
-								CAFile: "/non/existent",
-							},
-						},
-					},
+					Ingress: ingressConfig,
+					Egress:  egressConfig,
 				}
 			},
 			startUpError:        true,
@@ -180,13 +180,13 @@ func TestExtension(t *testing.T) {
 		{
 			name: "Error on Startup",
 			config: func(_ string) *Config {
+				ingressConfig := confighttp.NewDefaultServerConfig()
+				ingressConfig.NetAddr = confignet.AddrConfig{
+					Transport: "tcp",
+					Endpoint:  "invalid", // to mock error setting up listener.
+				}
 				return &Config{
-					Ingress: confighttp.ServerConfig{
-						NetAddr: confignet.AddrConfig{
-							Transport: "tcp",
-							Endpoint:  "invalid", // to mock error setting up listener.
-						},
-					},
+					Ingress: ingressConfig,
 				}
 			},
 			startUpError: true,

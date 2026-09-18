@@ -54,17 +54,17 @@ and allows you to configure a list of statements for the processor to execute. T
 
 Within each `<signal_statements>` list, only certain OTTL Path prefixes can be used:
 
-| Signal             | Path Prefix Values                             |
-|--------------------|------------------------------------------------|
-| trace_statements   | `resource`, `scope`, `span`, and `spanevent`   |
-| metric_statements  | `resource`, `scope`, `metric`, and `datapoint` |
-| log_statements     | `resource`, `scope`, and `log`                 |
-| profile_statements | `resource`, `scope`, and `profile`             |
+| Signal             | Path Prefix Values                                          |
+|--------------------|-------------------------------------------------------------|
+| trace_statements   | `resource`, `scope`, `span`, and `spanevent`                |
+| metric_statements  | `resource`, `scope`, `metric`, `datapoint`, and `exemplar`  |
+| log_statements     | `resource`, `scope`, and `log`                              |
+| profile_statements | `resource`, `scope`, and `profile`                          |
 
 This means, for example, that you cannot use the Path `span.attributes` within the `log_statements` configuration section.
 
 `error_mode`: determines how the processor treats errors that occur while processing a statement.
-If the top-level `error_mode` is not specified, `propagate` will be used.
+If the top-level `error_mode` is not specified, `ignore` will be used.
 The top-level `error_mode` can be overridden at statement group level, offering more granular control over error handling. If the statement group `error_mode` is not specified, the top-level `error_mode` is applied.
 
 | error_mode | description                                                                                                                                 |
@@ -141,6 +141,7 @@ transform:
   <trace|metric|log|profile>_statements:
     - context: string
       error_mode: propagate
+      shared_cache: true
       conditions: 
         - string
         - string
@@ -157,6 +158,8 @@ transform:
 ```
 
 `error_mode`: allows overriding the top-level `error_mode`. See [General Config](#general-config) for details on how to configure `error_mode`.
+
+`shared_cache` (experimental): enables sharing per-context caches between all advanced statement groups with the option enabled in this Transform Processor instance. Use this when you want to hold state across multiple iterations over a set of data.
 
 `conditions`: a list comprised of multiple where clauses, which will be processed as global conditions for the accompanying set of statements. The conditions are ORed together, which means only one condition needs to evaluate to true in order for the statements (including their individual Where clauses) to be executed.
 
@@ -260,6 +263,7 @@ In addition to the common OTTL functions, the processor defines its own function
 
 - [convert_sum_to_gauge](#convert_sum_to_gauge)
 - [convert_gauge_to_sum](#convert_gauge_to_sum)
+- [extract_avg_metric](#extract_avg_metric)
 - [extract_count_metric](#extract_count_metric)
 - [extract_percentile_metric](#extract_percentile_metric)
 - [extract_sum_metric](#extract_sum_metric)
@@ -272,6 +276,13 @@ In addition to the common OTTL functions, the processor defines its own function
 - [convert_exponential_histogram_to_histogram](#convert_exponential_histogram_to_histogram)
 - [aggregate_on_attribute_value](#aggregate_on_attribute_value)
 - [merge_histogram_buckets](#merge_histogram_buckets)
+
+**Logs only functions**
+
+- [ParseCEF](#parsecef)
+- [ParseCLF](#parseclf)
+- [ParseELF](#parseelf)
+- [ParseLEEF](#parseleef)
 
 **Traces only functions**
 
@@ -305,6 +316,27 @@ Examples:
 
 
 - `convert_gauge_to_sum("delta", true)`
+
+### extract_avg_metric
+
+> [!NOTE]  
+> This function supports Histograms, ExponentialHistograms and Summaries.
+
+`extract_avg_metric(Optional[suffix])`
+
+The `extract_avg_metric` function creates a new Gauge metric from a Histogram, ExponentialHistogram or Summary by dividing the sum value by the count value for each data point. Data points where the sum value is missing or the count value is `0` are skipped, to avoid division by zero. A metric will only be created if there is at least one data point.
+
+`suffix` is an optional string that defines the suffix for the metric name. By default, it is set to `_avg`.
+
+The name for the new metric will be `<original metric name><suffix>`. The fields that are copied are: `timestamp`, `starttimestamp`, `attributes`, `description`, and `unit`.
+
+The new metric that is created will be passed to all subsequent statements in the metrics statements list.
+
+Examples:
+
+- `extract_avg_metric()`
+
+- `extract_avg_metric(".avg")`
 
 ### extract_count_metric
 
@@ -469,82 +501,34 @@ Examples:
 
 ### convert_exponential_histogram_to_histogram
 
-__Warning:__ The approach used in this function to convert exponential histograms to explicit histograms __is not__ part of the __OpenTelemetry Specification__.
+**Warning:** This conversion is not defined by the OpenTelemetry Specification and may lose precision.
 
 `convert_exponential_histogram_to_histogram(distribution, [ExplicitBounds])`
 
-The `convert_exponential_histogram_to_histogram` function converts an ExponentialHistogram to an Explicit (_normal_) Histogram.
+Converts an exponential histogram to an explicit histogram.
 
-This function requires 2 arguments:
+The function requires two arguments:
 
-- `distribution` - This argument defines the distribution algorithm used to allocate the exponential histogram datapoints into a new Explicit Histogram. There are 4 options:
+- `distribution` controls how each exponential bucket is allocated:
+  - `upper` places the bucket count at its upper bound.
+  - `midpoint` places the bucket count at its arithmetic midpoint.
+  - `uniform` assumes a uniform distribution within the bucket and allocates counts according to the overlap with each explicit bucket. Rounding is deterministic.
+  - `random` uses the same overlap calculation as `uniform`, with randomized rounding.
+- `ExplicitBounds` is a non-empty, strictly increasing list of explicit histogram bounds.
 
-  - __upper__ - This approach identifies the highest possible value of each exponential bucket (_the upper bound_) and uses it to distribute the datapoints by comparing the upper bound of each bucket with the ExplicitBounds provided. This approach works better for small/narrow exponential histograms where the difference between the upper bounds and lower bounds are small.
+The result:
 
-      _For example, Given:_
-      1. count = 10
-      2. Boundaries: [5, 10, 15, 20, 25]
-      3. Upper Bound: 15
-      _Process:_
-      4. Start with zeros: [0, 0, 0, 0, 0]
-      5. Iterate the boundaries and compare $upper = 15$ with each boundary:
-        - $15>5$ (_skip_)
-        - $15>10$ (_skip_)
-        - $15<=15$ (allocate count to this boundary)
-      6. Allocate count: [0, 0, __10__, 0, 0]
-      7. Final Counts: [0, 0, __10__, 0, 0]
+- Converts positive, negative, and zero buckets.
+- Preserves the total count.
+- Contains `len(ExplicitBounds) + 1` bucket counts. For bounds `[b0, b1]`, the buckets are `(-Inf, b0]`, `(b0, b1]`, and `(b1, +Inf)`.
 
-  - __midpoint__ - This approach works in a similar way to the __upper__ approach, but instead of using the upper bound, it uses the midpoint of each exponential bucket. The midpoint is identified by calculating the average of the upper and lower bounds. This approach also works better for small/narrow exponential histograms.
+For example:
 
+```ottl
+convert_exponential_histogram_to_histogram("random", [0.0, 10.0, 100.0, 1000.0, 10000.0])
+```
 
-    >The __uniform__ and __random__ distribution algorithms both utilise the concept of intersecting boundaries.
-    Intersecting boundaries are any boundary in the `boundaries array` that falls between or on the lower and upper values of the Exponential Histogram boundaries. 
-    _For Example:_ if you have an Exponential Histogram bucket with a lower bound of 10 and upper of 20, and your boundaries array is [5, 10, 15, 20, 25], the intersecting boundaries are 10, 15, and 20 because they lie within the range [10, 20].
-
-  - __uniform__ - This approach distributes the datapoints for each bucket uniformly across the intersecting __ExplicitBounds__. The algorithm works as follows:
-
-     - If there are valid intersecting boundaries, the function evenly distributes the count across these boundaries. 
-	  - Calculate the count to be allocated to each boundary.
-	  - If there is a remainder after dividing the count equally, it distributes the remainder by incrementing the count for some of the boundaries until the remainder is exhausted.
-
-    _For example Given:_
-      1. count = 10
-      2. Exponential Histogram Bounds: [10, 20]
-      3. Boundaries:                [5, 10, 15, 20, 25]
-      4. Intersecting Boundaries:       [10, 15, 20]                          
-      5. Number of Intersecting Boundaries: 3
-      6. Using the formula: $count/numOfIntersections=10/3=3r1$
-      
-      _Uniform Allocation:_
-      
-      7. Start with zeros:          [0, 0, 0, 0, 0]
-      8. Allocate 3 to each:        [0, 3, 3, 3, 0]
-      9. Distribute remainder $r$ 1:    [0, 4, 3, 3, 0]
-      10. Final Counts:              [0, 4, 3, 3, 0]
-
-  - __random__ - This approach distributes the datapoints for each bucket randomly across the intersecting __ExplicitBounds__. This approach works in a similar manner to the uniform distribution algorithm with the main difference being that points are distributed randomly instead of uniformly. This works as follows:
-      - If there are valid intersecting boundaries, calculate the proportion of the count that should be allocated to each boundary based on the overlap of the boundary with the provided range (lower to upper).
-      - For each boundary, a random fraction of the calculated proportion is allocated.
-      - Any remaining count (_due to rounding or random distribution_) is then distributed randomly among the intersecting boundaries.
-      - If the bucket range does not intersect with any boundaries, the entire count is assigned to the start boundary.
-
-- `ExplicitBounds` represents the list of bucket boundaries for the new histogram. This argument is __required__ and __cannot be empty__.
-
-__WARNINGS:__
-
-- The process of converting an ExponentialHistogram to an Explicit Histogram is not perfect and may result in a loss of precision. It is important to define an appropriate set of bucket boundaries and identify the best distribution approach for your data in order to minimize this loss. 
-
-  For example, selecting Boundaries that are too high or too low may result histogram buckets that are too wide or too narrow, respectively.
-
-- __Negative Bucket Counts__ are not supported in Explicit Histograms, as such negative bucket counts are ignored.
-
-- __ZeroCounts__ are only allocated if the ExplicitBounds array contains a zero boundary. That is, if the Explicit Boundaries that you provide does not start with `0`, the function will not allocate any zero counts from the Exponential Histogram.
-
-This function should only be used when Exponential Histograms are not suitable for the downstream consumers or if upstream metric sources are unable to generate Explicit Histograms.
-
-__Example__:
-
-- `convert_exponential_histogram_to_histogram("random", [0.0, 10.0, 100.0, 1000.0, 10000.0])`
+Use this function only when downstream consumers cannot accept exponential histograms.
 
 ### scale_metric
 
@@ -661,20 +645,24 @@ To aggregate only using a specified set of attributes, you can use `keep_matchin
 
 ### merge_histogram_buckets
 
-`merge_histogram_buckets(bound)`
+`merge_histogram_buckets(target_value, method)`
 
-The `merge_histogram_buckets` function merges a specific bucket of a histogram with the next bucket by removing the specified boundary. This effectively combines the counts of the bucket ending at the specified bound with the counts of the next bucket.
+The `merge_histogram_buckets` function merges explicit histogram buckets. The `method` argument is optional and defaults to `remove_explicit_bound`.
 
-`bound` is a float64 value that specifies which bucket boundary to remove. The function will merge the bucket that ends at this boundary with the next bucket.
+`target_value` is interpreted according to `method`:
+- `remove_explicit_bound`: `target_value` is the explicit boundary to remove. The function merges the bucket ending at this boundary with the next bucket. This method uses floating-point tolerance (epsilon = 1e-12) when matching the boundary.
+- `limit_buckets`: `target_value` is the maximum number of buckets to keep. It must be a positive integer. The function reduces resolution with a single uniform compaction pass. It chooses the smallest divisor that keeps the resulting bucket count at or below `target_value`, merges adjacent buckets in groups of that size from lower to higher bucket order, combines their counts, and keeps any partial final group. Bucket count values and boundary widths do not affect which buckets are merged. The resulting histogram may have fewer than `target_value` buckets when no smaller uniform divisor can stay within the limit.
 
 The function:
-- Preserves the total count and sum of the histogram.  
-- Only works on histogram metrics (no-op for other metric types).  
-- Uses floating-point tolerance (epsilon = 1e-12) when matching the bound.  
-- Makes no changes if:  
-  - The bound is not found.  
-  - The histogram is empty.  
-  - The histogram structure is invalid (mismatched bounds and counts).
+- Preserves the total count and sum of the histogram.
+- Only works on histogram metrics (no-op for other metric types).
+- Makes no changes if:
+  - The explicit boundary is not found when using `remove_explicit_bound`.
+  - The histogram is already at or below the requested bucket limit when using `limit_buckets`.
+  - The histogram is empty.
+  - The histogram structure is invalid (mismatched bounds and counts, or unordered bounds when using `limit_buckets`).
+
+**NOTE:** The `limit_buckets` method reduces histogram resolution and may affect percentile or quantile accuracy. Use only when you are confident that reducing bucket detail is acceptable for downstream consumers.
 
 Examples:
 
@@ -689,7 +677,145 @@ Examples:
 # After merging at 0.5:
 # bounds: [0.1, 1.0]
 # counts: [5, 11, 1]
+
+# Limit histograms to at most 5 buckets
+- merge_histogram_buckets(5, method="limit_buckets") where metric.name == "http_request_duration"
+
+# Given a histogram with:
+# bounds: [0.1, 0.2, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0]
+# counts: [80, 4, 6, 120, 3, 2, 40, 10, 1]
+#
+# After limiting to 5 buckets, one compaction pass merges bucket pairs:
+# bounds: [0.2, 1.0, 5.0, 30.0]
+# counts: [84, 126, 5, 50, 1]
 ```
+
+### ParseCEF
+
+`ParseCEF(target)`
+
+The `ParseCEF` function returns a `pcommon.Map` that is the result of parsing the `target` string as a [Common Event Format (CEF)](https://www.microfocus.com/documentation/arcsight/arcsight-smartconnectors-8.4/cef-implementation-standard/Content/CEF/Chapter%201%20What%20is%20CEF.htm) message.
+
+`target` is a Getter that returns a string. If the returned string is empty, or cannot be parsed as CEF, an error will be returned.
+
+`ParseCEF` is tolerant of an optional syslog header preceding the `CEF:` token; parsing begins at the first occurrence of `CEF:` in the input.
+
+The returned map has the following top-level fields:
+
+- `cef.version` — the CEF version (the integer following `CEF:`).
+- `cef.device_vendor`, `cef.device_product`, `cef.device_version`, `cef.device_event_class_id`, `cef.name`, `cef.severity` — the six CEF header fields.
+- `cef.extensions` — a map of the parsed key/value extension pairs.
+
+Within the header fields, the escape sequences `\|` (pipe) and `\\` (backslash) are unescaped. Within extension values, the escape sequences `\\` (backslash), `\=` (equals), `\n` (newline), and `\r` (carriage return) are unescaped.
+
+Extension parsing uses the position of the next `key=` token as the end of the current value, so values may contain spaces. All extension values are returned as strings.
+
+Examples:
+
+- `ParseCEF(body)`
+
+- `ParseCEF("CEF:0|Security|threatmanager|1.0|100|worm successfully stopped|10|src=10.0.0.1 dst=2.1.2.2 spt=1232")`
+
+### ParseCLF
+
+`ParseCLF(target, Optional[format])`
+
+The `ParseCLF` function returns a `pcommon.Map` that is the result of parsing the `target` string as a [Common Log Format (CLF)](https://www.w3.org/Daemon/User/Config/Logging.html#common-logfile-format) HTTP access log entry.
+
+`target` is a Getter that returns a string. If the returned string is empty, or cannot be parsed in the selected format, an error will be returned.
+
+`format` is an optional string that selects the log format to parse. Valid values are:
+
+- `"clf"` (default) — the strict Common Log Format:
+
+  ```
+  remotehost rfc931 auth_user [date] "request" status bytes
+  ```
+
+- `"combined"` — the NCSA Combined Log Format used by default in many Apache and nginx configurations, which is CLF with the quoted referer and user-agent appended:
+
+  ```
+  remotehost rfc931 auth_user [date] "request" status bytes "referer" "user-agent"
+  ```
+
+Quoted fields (`request`, `referer`, `user-agent`) may contain backslash escape sequences as produced by Apache (`\"`, `\\`, `\xhh`, and C-style control escapes such as `\n` and `\t` — see the [mod_log_config format notes](https://httpd.apache.org/docs/current/mod/mod_log_config.html#format-notes)) and nginx (`\xhh`). These sequences are unescaped in the returned values.
+
+The returned map has the following fields:
+
+- `clf.remote_host` — the client's DNS name or IP address.
+- `clf.rfc931` — the remote logname of the user (CLF uses `-` when unknown).
+- `clf.auth_user` — the authenticated user (CLF uses `-` when unknown).
+- `clf.timestamp` — the contents of the bracketed date field, preserved as a string.
+- `clf.request` — the raw request line as sent by the client.
+- `clf.method`, `clf.request_uri`, `clf.protocol` — the parsed components of the request line, only set when the request line is well-formed.
+- `clf.status` — the HTTP status code as an integer.
+- `clf.bytes` — the content-length of the response as an integer. Omitted when CLF reports `-` (e.g. on a 304 response).
+- `clf.referer`, `clf.user_agent` — the referer and user-agent strings, only set when `format` is `"combined"`.
+
+Examples:
+
+- `ParseCLF(body)`
+- `ParseCLF("127.0.0.1 - frank [10/Oct/2000:13:55:36 -0700] \"GET /apache_pb.gif HTTP/1.0\" 200 2326")`
+- `ParseCLF(body, "combined")`
+
+### ParseELF
+
+`ParseELF(target)`
+
+The `ParseELF` function returns a `pcommon.Map` that is the result of parsing the `target` string as a [W3C Extended Log Format (ELF)](https://www.w3.org/TR/WD-logfile.html) log block.
+
+`target` is a Getter that returns a string containing a complete ELF log block (one or more directive lines followed by data lines). If the string is empty or does not contain a valid `#Version` directive, an error is returned.
+
+**Intended usage:** `ParseELF` is designed for pipelines where the full ELF block — header directives (`#Version`, `#Fields`, etc.) and data lines — is available as a single string. This is the case when using the [filelog receiver](../../receiver/filelogreceiver/README.md) with a multiline configuration that groups an entire ELF file (or rotated segment) into one log record body, or when the entire log content is read from a single field. In a line-by-line streaming pipeline where `#Fields` arrives only once at file open, each individual data line does not carry its own header; for that pattern you would need to prepend the known header directives to each data line before passing the string to `ParseELF`.
+
+The returned map contains the following keys:
+
+* `elf.version` — value of the `#Version` directive (required).
+* `elf.software` — value of `#Software` (omitted if not present).
+* `elf.date` — value of `#Date` (omitted if not present).
+* `elf.start_date` — value of `#Start-Date` (omitted if not present).
+* `elf.end_date` — value of `#End-Date` (omitted if not present).
+* `elf.remark` — value of `#Remark` (omitted if not present).
+* `elf.fields` — string slice of field names from the last `#Fields` directive.
+* `elf.entries` — slice of maps, one per data line, keyed by field name. Missing values are represented as `"-"`.
+
+Multiple `#Fields` directives within a single block are supported; each directive applies to subsequent data lines until the next `#Fields` directive is encountered. Double-quoted field values (as produced by Microsoft IIS) are handled correctly.
+
+Examples:
+
+- `ParseELF(body)`
+
+- `ParseELF("#Version: 1.0\n#Fields: time cs-method cs-uri\n00:34:23 GET /foo/bar.html")`
+
+### ParseLEEF
+
+`ParseLEEF(target)`
+
+The `ParseLEEF` function returns a `pcommon.Map` that is the result of parsing the `target` string as a [Log Event Extended Format (LEEF)](https://www.ibm.com/docs/en/dsm?topic=overview-leef-event-components) message.
+
+`target` is a Getter that returns a string. If the returned string is empty, or cannot be parsed as LEEF, an error will be returned.
+
+`ParseLEEF` can parse both LEEF 1.0 and LEEF 2.0 messages. The function is tolerant of an optional syslog header preceding the `LEEF:` token; parsing begins at the first occurrence of `LEEF:` in the input, so a literal `LEEF:` appearing in a syslog header ahead of the real header would be misinterpreted.
+
+The returned map has the following top-level fields:
+
+* `leef.version` — the LEEF version (`"1.0"` or `"2.0"`).
+* `leef.vendor`, `leef.product.name`, `leef.product.version`, `leef.event.id` — the LEEF header fields.
+* `leef.attributes` — a map of the parsed key/value attribute pairs.
+
+For LEEF 1.0 the attribute delimiter is always a tab. For LEEF 2.0 the delimiter is taken from the header and must be either a single character or a `0x`-prefixed hex value decoding to a single byte (e.g. `0x09` for tab). An empty delimiter field defaults to tab. The delimiter field is also optional: if the position normally occupied by the delimiter looks like the start of an attribute (i.e. contains `=`), it is treated as the first attribute and the delimiter defaults to tab.
+
+Attribute parsing is lenient: pairs without an `=` separator or with an empty key are silently skipped, and when the same key appears more than once the last occurrence wins. Whitespace within keys and values is preserved verbatim, since the LEEF spec defines a value as everything up to the delimiter.
+
+All attribute values are returned as strings. LEEF defines a set of [predefined event attributes](https://www.ibm.com/docs/en/dsm?topic=overview-predefined-leef-event-attributes) (e.g. `src`, `dst`, `srcPort`, `usrName`, `devTime`) with expected types such as Integer, IPv4/IPv6, and Time.
+
+Examples:
+
+- `ParseLEEF(body)`
+
+- `ParseLEEF("LEEF:1.0|Microsoft|MSExchange|4.0 SP1|15345|src=10.50.1.1\tdst=2.10.20.20\tsev=5")`
+
+- `ParseLEEF("LEEF:2.0|Lancope|StealthWatch|1.0|41|^|src=10.0.1.8^dst=10.0.0.5^sev=5")`
 
 ### set_semconv_span_name
 
@@ -701,7 +827,7 @@ The primary use case of the `set_semconv_span_name()` function is to address hig
 
 Parameters:
 
-* `semconvVersion` is the version of the Semantic Conventions used to generate the `span.name`, older semconv attributes are supported. Versions `1.37.0` to `1.40.0` are supported.
+* `semconvVersion` is the version of the Semantic Conventions used to generate the `span.name`. A set of older/deprecated semconv attributes are also supported for backward compatibility (see the table below). Versions `1.37.0` to `1.43.0` are supported.
 * `originalSpanNameAttribute` is the optional name of the attribute used to copy the original `span.name` if different from the name derived from semantic conventions.
 
 Sanitization examples:
@@ -716,7 +842,7 @@ Sanitization examples:
            http.route: /api/v1/users/{id}
            url.path: /api/v1/users/123
         ```
-   * Span name after applying `set_semconv_span_name("1.40.0")`: `GET /api/v1/users/{id}`
+   * Span name after applying `set_semconv_span_name("1.43.0")`: `GET /api/v1/users/{id}`
    * No loss of information on `span.name` occurs because the recommended attribute `http.route` is present.
 * Span with high-cardinality name lacking recommended semantic convention attribute `http.route`
     * Incoming span:
@@ -727,7 +853,7 @@ Sanitization examples:
             http.request.method: GET
             url.path: /api/v1/users/123
          ```
-    * Span name after applying `set_semconv_span_name("1.40.0")`: `GET`
+    * Span name after applying `set_semconv_span_name("1.43.0")`: `GET`
     * Loss of information on `span.name` occurs because the recommended attribute `http.route` is missing.
     Note that this loss of information is mitigated if the instrumentation produced attributes that contain the URL path like `url.path` or `url.full`.
 * Compliant span name is unchanged
@@ -740,26 +866,28 @@ Sanitization examples:
             http.route: /api/v1/users/{id}
             url.path: /api/v1/users/123
          ```
-    * Span name after applying `set_semconv_span_name("1.40.0")`: `GET /api/v1/users/{id}`
+    * Span name after applying `set_semconv_span_name("1.43.0")`: `GET /api/v1/users/{id}`
 
 
-Backward compatibility: `set_semconv_span_name` will map the following attributes to their equivalents per the v1.39.0 semantic conventions:
+Backward compatibility: `set_semconv_span_name` will also read the following deprecated attributes, mapping each to its current equivalent:
 
-| v1.40.0 Attribute     | Older attribute    |
-|-----------------------|--------------------|
-| `http.request.method` | `http.method`      |
-| `rpc.method`          | `rpc.grpc.method`  |
-| `rpc.service`         | `rpc.grpc.service` |
-| `rpc.system.name`     | `rpc.system`       |
-| `db.system.name`      | `db.system`        |
-| `db.operation.name`   | `db.operation`     |
-| `db.collection.name`  | `db.name`          |
+| v1.43.0 Attribute            | Older attribute         |
+|------------------------------|-------------------------|
+| `http.request.method`        | `http.method`           |
+| `rpc.method`                 | `rpc.grpc.method`       |
+| `rpc.service`                | `rpc.grpc.service`      |
+| `rpc.system.name`            | `rpc.system`            |
+| `db.system.name`             | `db.system`             |
+| `db.operation.name`          | `db.operation`          |
+| `db.namespace`               | `db.name`               |
+| `messaging.operation.name`   | `messaging.operation`   |
+| `messaging.destination.name` | `messaging.destination` |
 
 Examples:
 
-- `set_semconv_span_name("1.40.0")`
+- `set_semconv_span_name("1.43.0")`
 
-- `set_semconv_span_name("1.40.0", "original_span_name")`
+- `set_semconv_span_name("1.43.0", "original_span_name")`
 
 ## Examples
 
@@ -969,6 +1097,10 @@ The Transform Processor uses the [OpenTelemetry Transformation Language](https:/
 
 ## Feature Gate
 
+### `processor.transform.defaultErrorModeIgnore`
+
+The `processor.transform.defaultErrorModeIgnore` [feature gate](https://github.com/open-telemetry/opentelemetry-collector/blob/main/featuregate/README.md#collector-feature-gates) changes the default top-level `error_mode` of the transform processor from `propagate` to `ignore`. This gate is currently in `beta` (enabled by default), meaning the default `error_mode` is `ignore`. To revert to the previous default of `propagate`, disable the gate: `--feature-gates=-processor.transform.defaultErrorModeIgnore`.
+
 ### `transform.flatten.logs`
 
 The `transform.flatten.logs` [feature gate](https://github.com/open-telemetry/opentelemetry-collector/blob/main/featuregate/README.md#collector-feature-gates) enables the `flatten_data` configuration option (default `false`). With `flatten_data: true`, the processor provides each log record with a distinct copy of its resource and scope. Then, after applying all transformations, the log records are regrouped by resource and scope.
@@ -989,3 +1121,21 @@ The feature is currently only available for log processing.
   ```
   
   Run collector: `./otelcol --config config.yaml --feature-gates=transform.flatten.logs`
+
+### `ottl.set.allowNil`
+
+The `ottl.set.allowNil` [feature gate](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/pkg/ottl/documentation.md) changes the behavior of the OTTL `set` function when a `nil` value is evaluated. When enabled, `set` will pass the `nil` value directly to the target. Depending on the target, this may result in an error or an empty value. See the [OTTL Documentation](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/pkg/ottl) for full details and migration instructions.
+
+## Available Benchmarks
+
+The transform processor is tested as part of the project's load tests, with the results being
+publicly available on the benchmarks
+[page](https://open-telemetry.github.io/opentelemetry-collector-contrib/benchmarks/loadtests).
+There you can find the CPU and memory usage of the processor executing a representative set of OTTL
+statements against each signal at 10,000 items/second:
+
+- Traces: [CPU](https://open-telemetry.github.io/opentelemetry-collector-contrib/benchmarks/loadtests/#transformprocessortraces-cpu-percentage) and [memory](https://open-telemetry.github.io/opentelemetry-collector-contrib/benchmarks/loadtests/#transformprocessortraces-ram-mib)
+- Metrics: [CPU](https://open-telemetry.github.io/opentelemetry-collector-contrib/benchmarks/loadtests/#transformprocessormetrics-cpu-percentage) and [memory](https://open-telemetry.github.io/opentelemetry-collector-contrib/benchmarks/loadtests/#transformprocessormetrics-ram-mib)
+- Logs: [CPU](https://open-telemetry.github.io/opentelemetry-collector-contrib/benchmarks/loadtests/#transformprocessorlogs-cpu-percentage) and [memory](https://open-telemetry.github.io/opentelemetry-collector-contrib/benchmarks/loadtests/#transformprocessorlogs-ram-mib)
+
+Refer to the [test](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/testbed/tests/transform_processor_test.go) for more information about the setup.

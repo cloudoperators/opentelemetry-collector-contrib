@@ -156,7 +156,7 @@ func TestScraper(t *testing.T) {
 				},
 			}
 
-			cfg.CollectionInterval = 100 * time.Millisecond
+			cfg.ControllerConfig.CollectionInterval = 100 * time.Millisecond
 			settings := receivertest.NewNopSettings(metadata.Type)
 
 			scraper := newScraper(cfg, settings)
@@ -294,11 +294,11 @@ func TestScraper_ErrorEnumCounts(t *testing.T) {
 	}
 	// Test multiple endpoints with different error types
 	endpoints := []string{
-		"invalid:host", // Invalid host format for invalid_endpoint
-		"1.2.3.4:80",   // Unreachable IP for connection_timeout
-		"invalid:host", // Another invalid_endpoint
-		"1.2.3.4:80",   // Another connection_timeout
-		"1.2.3.4:80",   // Another connection_timeout
+		"invalid:host1", // Invalid host format for invalid_endpoint
+		"1.2.3.4:80",    // Unreachable IP for connection_timeout
+		"invalid:host2", // Another invalid_endpoint
+		"1.2.3.4:81",    // Another connection_timeout
+		"1.2.3.4:82",    // Another connection_timeout
 	}
 
 	cfg := &Config{
@@ -365,7 +365,7 @@ func TestScraper_ErrorEnumCounts(t *testing.T) {
 					for l := 0; l < dps.Len(); l++ {
 						dp := dps.At(l)
 						if val, ok := dp.Attributes().Get("error.code"); ok {
-							errorCounts[val.Str()] = dp.IntValue()
+							errorCounts[val.Str()] += dp.IntValue()
 						}
 					}
 				}

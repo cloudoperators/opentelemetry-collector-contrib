@@ -5,13 +5,6 @@ package ottl // import "github.com/open-telemetry/opentelemetry-collector-contri
 
 import (
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/featuregate"
-)
-
-var panicDuplicateName = featuregate.GlobalRegistry().MustRegister(
-	"ottl.PanicDuplicateName",
-	featuregate.StageBeta,
-	featuregate.WithRegisterDescription("When enabled, the CreateFactoryMap panics if the name is duplicated."),
 )
 
 // Arguments holds the arguments for an OTTL function, with arguments
@@ -51,7 +44,6 @@ type factory[K any] struct {
 	createFunctionFunc CreateFunctionFunc[K]
 }
 
-//nolint:unused
 func (*factory[K]) unexportedFactoryFunc() {}
 
 func (f *factory[K]) Name() string {
@@ -90,10 +82,8 @@ func CreateFactoryMap[K any](factories ...Factory[K]) map[string]Factory[K] {
 	factoryMap := map[string]Factory[K]{}
 
 	for _, fn := range factories {
-		if panicDuplicateName.IsEnabled() {
-			if _, ok := factoryMap[fn.Name()]; ok {
-				panic("duplicate factory name: " + fn.Name())
-			}
+		if _, ok := factoryMap[fn.Name()]; ok {
+			panic("duplicate factory name: " + fn.Name())
 		}
 		factoryMap[fn.Name()] = fn
 	}

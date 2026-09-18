@@ -22,11 +22,11 @@ import (
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
+	"go.opentelemetry.io/collector/pdata/xpdata/xhash"
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/receiverhelper"
 	"go.uber.org/zap"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatautil"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/prometheus"
 	mdata "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver/internal/metadata"
 )
@@ -124,9 +124,20 @@ func (t *transaction) addSampleDatapoint(rKey resourceKey, ls labels.Labels, met
 	// But it can also be a staleNaN, which is inserted when the target goes away.
 	if metricName == scrapeUpMetricName && val != 1.0 && !value.IsStaleNaN(val) {
 		if val == 0.0 {
-			t.logger.Warn("Failed to scrape Prometheus endpoint",
-				zap.Int64("scrape_timestamp", atMs),
-				zap.Stringer("target_labels", ls))
+			var scrapeErr error
+			if target, ok := scrape.TargetFromContext(t.ctx); ok {
+				scrapeErr = target.LastError()
+			}
+			if scrapeErr != nil {
+				t.logger.Warn("Failed to scrape Prometheus endpoint",
+					zap.Error(scrapeErr),
+					zap.Int64("scrape_timestamp", atMs),
+					zap.Stringer("target_labels", ls))
+			} else {
+				t.logger.Warn("Failed to scrape Prometheus endpoint",
+					zap.Int64("scrape_timestamp", atMs),
+					zap.Stringer("target_labels", ls))
+			}
 		} else {
 			t.logger.Warn("The 'up' metric contains invalid value",
 				zap.Float64("value", val),
@@ -499,7 +510,7 @@ func getScopeID(ls labels.Labels) (scopeID, pcommon.Map) {
 		attrKey := strings.TrimPrefix(lbl.Name, prometheus.ScopeLabelPrefix)
 		attrs.PutStr(attrKey, lbl.Value)
 	})
-	scope.attrsHash = pdatautil.MapHash(attrs)
+	scope.attrsHash = xhash.MapHash(attrs)
 	return scope, attrs
 }
 

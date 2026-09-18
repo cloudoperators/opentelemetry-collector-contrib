@@ -35,8 +35,10 @@ func createDefaultConfig() component.Config {
 	netAddr := confignet.NewDefaultAddrConfig()
 	netAddr.Transport = confignet.TransportTypeTCP
 	netAddr.Endpoint = defaultHTTPEndpoint
+	serverConfig := confighttp.NewDefaultServerConfig()
+	serverConfig.NetAddr = netAddr
 	return &Config{
-		ServerConfig:    confighttp.ServerConfig{NetAddr: netAddr},
+		ServerConfig:    serverConfig,
 		ParseStringTags: false,
 	}
 }

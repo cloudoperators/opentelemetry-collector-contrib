@@ -185,7 +185,22 @@ func (rw *resourceWatcher) prepareSharedInformerFactory() error {
 
 // shouldWatchEndpointSlice returns true if the service endpoint count metric is enabled
 func (rw *resourceWatcher) shouldWatchEndpointSlice() bool {
-	return rw.config.Metrics.K8sServiceEndpointCount.Enabled
+	return rw.config.MetricsBuilderConfig.Metrics.K8sServiceEndpointCount.Enabled
+}
+
+// shouldWatchPersistentVolume returns true if any PV metric is enabled or metadata/entity destinations are configured.
+func (rw *resourceWatcher) shouldWatchPersistentVolume() bool {
+	return rw.config.MetricsBuilderConfig.Metrics.K8sPersistentvolumeStatusPhase.Enabled ||
+		rw.config.MetricsBuilderConfig.Metrics.K8sPersistentvolumeStorageCapacity.Enabled ||
+		rw.shouldWatchResourceForMetadataOnly()
+}
+
+// shouldWatchPersistentVolumeClaim returns true if any PVC metric is enabled or metadata/entity destinations are configured.
+func (rw *resourceWatcher) shouldWatchPersistentVolumeClaim() bool {
+	return rw.config.MetricsBuilderConfig.Metrics.K8sPersistentvolumeclaimStatusPhase.Enabled ||
+		rw.config.MetricsBuilderConfig.Metrics.K8sPersistentvolumeclaimStorageCapacity.Enabled ||
+		rw.config.MetricsBuilderConfig.Metrics.K8sPersistentvolumeclaimStorageRequest.Enabled ||
+		rw.shouldWatchResourceForMetadataOnly()
 }
 
 // shouldWatchPersistentVolume returns true if any PV metric is enabled or metadata/entity destinations are configured.

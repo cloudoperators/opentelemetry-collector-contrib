@@ -8,13 +8,19 @@ OTEL_STABLE_VERSION=main
 VERSION=$(shell git describe --always --match "v[0-9]*" HEAD)
 TRIMMED_VERSION=$(shell grep -o 'v[^-]*' <<< "$(VERSION)" | cut -c 2-)
 CORE_VERSIONS=$(SRC_PARENT_DIR)/opentelemetry-collector/versions.yaml
-GO_COMPAT_VERSION=$(shell grep '^go ' go.mod | awk '{print $$2}')
 
 COMP_REL_PATH=cmd/otelcontribcol/components.go
 MOD_NAME=github.com/open-telemetry/opentelemetry-collector-contrib
 
 GROUP ?= all
-FOR_GROUP_TARGET=for-$(GROUP)-target
+# If GROUP contains a slash (e.g. "receiver/hostmetrics" or a space-separated list
+# of module paths emitted by compute-ci-scope.sh), invoke the per-module delegation
+# targets directly. Otherwise, map the group name to its for-<name>-target rule.
+ifneq ($(findstring /,$(GROUP)),)
+    FOR_GROUP_TARGET=$(GROUP)
+else
+    FOR_GROUP_TARGET=for-$(GROUP)-target
+endif
 
 FIND_MOD_ARGS=-type f -name "go.mod"
 TO_MOD_DIR=dirname {} \; | sort | grep -E '^./'
@@ -169,15 +175,15 @@ ifndef VERSION
 	$(error VERSION is required. Usage: make bump-go-version VERSION=1.24.11)
 endif
 	@echo "Bumping Go version to $(VERSION)..."
-	
+
 	# Update main go.mod
 	@echo "Updating main go.mod..."
 	@sed -i '' -E 's/^go [0-9]+\.[0-9]+.*/go $(VERSION)/' go.mod
-	
+
 	# Update all module go.mod files
 	@echo "Updating all module go.mod files..."
 	@find . -name "go.mod" -type f -not -path "./go.mod" -exec sed -i '' -E 's/^go [0-9]+\.[0-9]+\.[0-9]+/go $(VERSION)/g' {} \;
-	
+
 	@echo ""
 	@echo "✓ Successfully bumped golang version to $(VERSION)"
 	@echo ""
@@ -195,6 +201,13 @@ gomoddownload:
 .PHONY: gotest
 gotest:
 	$(MAKE) $(FOR_GROUP_TARGET) TARGET="test"
+
+# gotest-no-race runs only packages that contain //go:build !race test files,
+# without the race detector. Most modules will skip silently because they have
+# no such files, keeping the total CI cost small.
+.PHONY: gotest-no-race
+gotest-no-race:
+	$(MAKE) $(FOR_GROUP_TARGET) TARGET="test-no-race"
 
 .PHONY: gotest-with-cover
 gotest-with-cover:
@@ -278,6 +291,18 @@ push-tags:
 $(ALL_MODS):
 	@echo "Running target '$(TARGET)' in module '$@' as part of group '$(GROUP)'"
 	$(MAKE) --no-print-directory -C $@ $(TARGET)
+
+# datadogexporter and its integrationtest are the two heaviest modules to
+# type-check. Under `make -jN` they can run concurrently and the combined
+# memory peak OOM-kills the CI runner, so serialize them relative to each
+# other (each may still run alongside a lighter module). A plain prerequisite
+# is used so it works on the runner's GNU Make 4.3 (`.WAIT`/`.NOTPARALLEL`
+# prereqs need 4.4+).
+exporter/datadogexporter/integrationtest: exporter/datadogexporter
+pkg/datadog: exporter/datadogexporter/integrationtest
+extension/datadogextension: pkg/datadog
+connector/datadogconnector: extension/datadogextension
+exporter/datadogexporter: internal/datadog
 
 # Trigger each module's delegation target
 .PHONY: for-all-target
@@ -395,30 +420,36 @@ docker-golden:
 
 GITHUBGEN_ARGS ?= -skipgithub
 
+# Updates CODEOWNERS and issue template component lists in .github
 .PHONY: gengithub
 gengithub:
 	$(GITHUBGEN) $(GITHUBGEN_ARGS)
 
+# Updates distribution component lists and data in reports/distributions
 .PHONY: gendistributions
 gendistributions:
 	$(GITHUBGEN) $(GITHUBGEN_ARGS) distributions
 
 .PHONY: gencodecov
 gencodecov:
-	cd $(SRC_ROOT)/cmd/codecovgen && go run . --base-prefix github.com/open-telemetry/opentelemetry-collector-contrib --skipped-modules '**/*test,**/examples/**,pkg/**,cmd/**,internal/**,*/encoding/**' --dir $(SRC_ROOT)
+	cd $(SRC_ROOT)/cmd/codecovgen && go run . --base-prefix github.com/open-telemetry/opentelemetry-collector-contrib --skipped-modules '**/*test,**/examples/**,cmd/**,internal/**,*/encoding/**' --dir $(SRC_ROOT)
 
+# Regenerates all code, then updates CODEOWNERS, issue templates and component labels in .github
 .PHONY: update-codeowners
 update-codeowners: generate gengithub
 	$(MAKE) genlabels
 
+# Updates CODEOWNERS and issue template component lists in .github
 .PHONY: gencodeowners
 gencodeowners:
 	$(GITHUBGEN) $(GITHUBGEN_ARGS)
 
+# Updates CODEOWNERS in .github
 .PHONY: codeowners
 codeowners:
 	$(GITHUBGEN) $(GITHUBGEN_ARGS) codeowners
 
+# Updates chloggen component lists in .chloggen/config.yaml
 .PHONY: generate-chloggen-components
 generate-chloggen-components:
 	$(GITHUBGEN) $(GITHUBGEN_ARGS) chloggen-components
@@ -676,6 +707,7 @@ multimod-verify:
 .PHONY: multimod-prerelease
 multimod-prerelease:
 	$(MULTIMOD) prerelease -s=true -b=false -v ./versions.yaml -m contrib-base
+	$(MULTIMOD) prerelease -s=true -b=false -v ./versions.yaml -m stable-base
 	$(MAKE) gotidy
 
 .PHONY: multimod-sync
@@ -690,7 +722,11 @@ crosslink:
 
 .PHONY: actionlint
 actionlint:
-	$(ACTIONLINT) -config-file .github/actionlint.yaml -color $(filter-out $(wildcard .github/workflows/*windows.y*), $(wildcard .github/workflows/*.y*))
+	@if [ -z "$(ACTIONLINT)" ]; then \
+		echo "actionlint failed to build (see errors above); refusing to report success"; \
+		exit 1; \
+	fi
+	$(ACTIONLINT) -config-file .github/actionlint.yaml -color $(wildcard .github/workflows/*.y*)
 
 .PHONY: clean
 clean:
@@ -711,7 +747,7 @@ SCHEMA_DIRS := $(shell find $(CURDIR) -path "*testdata*" -prune -o -path "*inter
 
 .PHONY: generate-schemas
 generate-schemas:
-	@$(foreach dir,$(SCHEMA_DIRS), cd $(SRC_ROOT)/cmd/schemagen && go run . $(abspath $(dir)) -o $(abspath $(dir));)
+	@$(foreach dir,$(SCHEMA_DIRS), go run $(SCHEMAGEN_PKG) $(abspath $(dir)) -o $(abspath $(dir));)
 
 .PHONY: checks
 checks:

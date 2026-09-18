@@ -23,10 +23,13 @@ feature_gates:
     to_version: v0.154.0
     reference_url: https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/41480
 
-reaggregation_enabled: true
 resource_attributes:
   kafka.cluster.alias:
     description: The alias name (string) of the cluster
+    enabled: false
+    type: string
+  kafka.cluster.id:
+    description: The unique ID (string) of the Kafka cluster, as reported in cluster metadata.
     enabled: false
     type: string
 

@@ -14,7 +14,6 @@ import (
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/confmap/confmaptest"
 	"go.opentelemetry.io/collector/consumer/consumertest"
-	"go.opentelemetry.io/collector/featuregate"
 	"go.opentelemetry.io/collector/processor/processortest"
 	"go.opentelemetry.io/collector/processor/xprocessor"
 
@@ -22,10 +21,10 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/ottl/contexts/ottldatapoint"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/ottl/contexts/ottllog"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/ottl/contexts/ottlmetric"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/ottl/contexts/ottlprofile"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/ottl/contexts/ottlresource"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/ottl/contexts/ottlspan"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/ottl/contexts/ottlspanevent"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/ottl/contexts/xprofile/ottlprofile"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/processor/filterprocessor/internal/metadata"
 )
 
@@ -41,20 +40,10 @@ func TestCreateDefaultConfig(t *testing.T) {
 	cfg := factory.CreateDefaultConfig()
 
 	assert.EqualExportedValues(t, &Config{
-		ErrorMode: ottl.PropagateError,
+		ErrorMode: ottl.IgnoreError,
 	}, cfg)
 	assertConfigContainsDefaultFunctions(t, *cfg.(*Config))
 	assert.NoError(t, componenttest.CheckConfigStruct(cfg))
-
-	t.Cleanup(func() {
-		_ = featuregate.GlobalRegistry().Set(metadata.ProcessorFilterDefaultErrorModeIgnoreFeatureGate.ID(), false)
-	})
-
-	err := featuregate.GlobalRegistry().Set(metadata.ProcessorFilterDefaultErrorModeIgnoreFeatureGate.ID(), true)
-	require.NoError(t, err)
-
-	cfg = factory.CreateDefaultConfig()
-	assert.Equal(t, ottl.IgnoreError, cfg.(*Config).ErrorMode)
 }
 
 func TestCreateProcessors(t *testing.T) {
