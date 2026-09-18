@@ -203,21 +203,6 @@ func (rw *resourceWatcher) shouldWatchPersistentVolumeClaim() bool {
 		rw.shouldWatchResourceForMetadataOnly()
 }
 
-// shouldWatchPersistentVolume returns true if any PV metric is enabled or metadata/entity destinations are configured.
-func (rw *resourceWatcher) shouldWatchPersistentVolume() bool {
-	return rw.config.Metrics.K8sPersistentvolumeStatusPhase.Enabled ||
-		rw.config.Metrics.K8sPersistentvolumeStorageCapacity.Enabled ||
-		rw.shouldWatchResourceForMetadataOnly()
-}
-
-// shouldWatchPersistentVolumeClaim returns true if any PVC metric is enabled or metadata/entity destinations are configured.
-func (rw *resourceWatcher) shouldWatchPersistentVolumeClaim() bool {
-	return rw.config.Metrics.K8sPersistentvolumeclaimStatusPhase.Enabled ||
-		rw.config.Metrics.K8sPersistentvolumeclaimStorageCapacity.Enabled ||
-		rw.config.Metrics.K8sPersistentvolumeclaimStorageRequest.Enabled ||
-		rw.shouldWatchResourceForMetadataOnly()
-}
-
 // getInformerFactories creates the informer factories which are used to set up the informers for the
 // resources that should be observed. The informer factories are returned as a map[string]informer.SharedInformerFactory,
 // where the map keys represent the namespace that should be observed. If the factory is created for the whole cluster,

@@ -3411,11 +3411,6 @@ func NewDefaultMetricsBuilderConfig() MetricsBuilderConfig {
 	}
 }
 
-// Deprecated: Use NewDefaultMetricsBuilderConfig.
-func DefaultMetricsBuilderConfig() MetricsBuilderConfig {
-	return NewDefaultMetricsBuilderConfig()
-}
-
 // LogsBuilderConfig is a configuration for mysql logs builder.
 type LogsBuilderConfig struct {
 	Events             EventsConfig             `mapstructure:"events"`

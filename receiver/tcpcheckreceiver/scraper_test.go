@@ -289,9 +289,6 @@ func updateErrorCodeInMetrics(metrics pmetric.Metrics, errorCode string) pmetric
 }
 
 func TestScraper_ErrorEnumCounts(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("knonw failure on windows, see http://github.com/open-telemetry/opentelemetry-collector-contrib/issues/47826")
-	}
 	// Test multiple endpoints with different error types
 	endpoints := []string{
 		"invalid:host1", // Invalid host format for invalid_endpoint

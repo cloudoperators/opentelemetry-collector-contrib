@@ -130,13 +130,6 @@ func TestLoadConfig(t *testing.T) {
 						"operators":         []any{map[string]any{"id": "container-parser", "type": "container"}},
 					},
 				},
-				Discovery: DiscoveryConfig{
-					DefaultFileLogConfig: userConfigMap{
-						"include_file_path": true,
-						"include_file_name": false,
-						"operators":         []any{map[string]any{"id": "container-parser", "type": "container"}},
-					},
-				},
 			},
 		},
 	}

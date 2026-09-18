@@ -35,14 +35,6 @@ type Config struct {
 	// attempts allowed before enforcing the cooldown period. Defaults to 5.
 	CacheRetryLimit int `mapstructure:"cache_retry_limit"`
 
-	// CacheCooldown is the duration to wait before retrying schema fetches
-	// after the retry limit has been reached. Defaults to 5 minutes.
-	CacheCooldown time.Duration `mapstructure:"cache_cooldown"`
-
-	// CacheRetryLimit is the number of consecutive failed schema fetch
-	// attempts allowed before enforcing the cooldown period. Defaults to 5.
-	CacheRetryLimit int `mapstructure:"cache_retry_limit"`
-
 	// PreCache is a list of schema URLs that are downloaded
 	// and cached at the start of the collector runtime
 	// in order to avoid fetching data that later on could
