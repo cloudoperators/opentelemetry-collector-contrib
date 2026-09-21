@@ -3,7 +3,6 @@ module github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opense
 go 1.26.0
 
 require (
-	github.com/open-telemetry/opentelemetry-collector-contrib/exporter/opensearchexporter v0.161.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/golden v0.161.0
 	github.com/opensearch-project/opensearch-go/v4 v4.6.0
 	github.com/stretchr/testify v1.12.1
