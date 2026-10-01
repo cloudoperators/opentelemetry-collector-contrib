@@ -46,6 +46,7 @@ The following settings are optional:
     * `secret` (required if `hmac_signature` is set): The shared secret used to compute the HMAC-SHA256 digest.
     * `header` (required if `hmac_signature` is set): The HTTP header name containing the signature (e.g. `X-Hub-Signature-256` for GitHub, `fpjs-event-signature` for Fingerprint).
     * `prefix` (required if `hmac_signature` is set): The prefix before the hex digest in the header value (e.g. `sha256=` for GitHub, `v1=` for Fingerprint).
+* `suppress_tls_handshake_eof` (default: true): If true, log lines of the form `http: TLS handshake error from <addr>: EOF` are downgraded from error to debug. These are emitted when a client closes the TCP connection before sending any TLS bytes, which is the typical pattern for Layer-4 health probes (e.g. Kubernetes `tcpSocket`, cloud load balancer TCP checks). All other TLS handshake errors are still logged at error level. Set to false to see every occurrence at error level.
 
 ### Split logs at newline example
 

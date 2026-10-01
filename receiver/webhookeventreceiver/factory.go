@@ -56,6 +56,7 @@ func createDefaultConfig() component.Config {
 		ConvertHeadersToAttributes: false, // optional, off by default
 		SplitLogsAtNewLine:         false,
 		SplitLogsAtJSONBoundary:    false,
+		SuppressTLSHandshakeEOF:    true,
 	}
 }
 

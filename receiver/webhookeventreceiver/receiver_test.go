@@ -25,6 +25,8 @@ import (
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumertest"
 	"go.opentelemetry.io/collector/receiver/receivertest"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/cloudoperators/opentelemetry-collector-contrib/receiver/webhookeventreceiver/internal/metadata"
 )
@@ -576,4 +578,48 @@ func TestHealthCheck(t *testing.T) {
 
 	response := w.Result()
 	require.Equal(t, http.StatusOK, response.StatusCode)
+}
+
+func TestTLSHandshakeEOFFilter(t *testing.T) {
+	core, logs := observer.New(zap.DebugLevel)
+	f := &tlsHandshakeEOFFilter{logger: zap.New(core)}
+
+	cases := []struct {
+		name     string
+		input    string
+		wantMsg  string
+		wantLvl  zap.AtomicLevel
+	}{
+		{
+			name:    "benign TLS EOF is debug",
+			input:   "http: TLS handshake error from 10.0.0.1:1234: EOF\n",
+			wantMsg: "http: TLS handshake error from 10.0.0.1:1234: EOF",
+			wantLvl: zap.NewAtomicLevelAt(zap.DebugLevel),
+		},
+		{
+			name:    "other TLS handshake error stays error",
+			input:   "http: TLS handshake error from 10.0.0.1:1234: remote error: tls: bad certificate\n",
+			wantMsg: "http: TLS handshake error from 10.0.0.1:1234: remote error: tls: bad certificate",
+			wantLvl: zap.NewAtomicLevelAt(zap.ErrorLevel),
+		},
+		{
+			name:    "unrelated http error stays error",
+			input:   "http: Accept error: too many open files\n",
+			wantMsg: "http: Accept error: too many open files",
+			wantLvl: zap.NewAtomicLevelAt(zap.ErrorLevel),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			n, err := f.Write([]byte(tc.input))
+			require.NoError(t, err)
+			require.Equal(t, len(tc.input), n)
+
+			entries := logs.TakeAll()
+			require.Len(t, entries, 1)
+			require.Equal(t, tc.wantMsg, entries[0].Message)
+			require.Equal(t, tc.wantLvl.Level(), entries[0].Level)
+		})
+	}
 }

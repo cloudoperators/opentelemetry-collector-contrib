@@ -38,7 +38,7 @@ type Config struct {
 	ConvertHeadersToAttributes bool                    `mapstructure:"convert_headers_to_attributes"` // optional to convert all headers to attributes
 	HeaderAttributeRegex       string                  `mapstructure:"header_attribute_regex"`        // optional to convert headers matching a regex to log attributes
 	HMACSignature              HMACSignature           `mapstructure:"hmac_signature"`                // optional HMAC hex digest signature verification
-
+	SuppressTLSHandshakeEOF    bool                    `mapstructure:"suppress_tls_handshake_eof"`    // if true, downgrade "http: TLS handshake error ...: EOF" messages to debug (common with L4 health probers). Default is true.
 }
 
 type RequiredHeader struct {
