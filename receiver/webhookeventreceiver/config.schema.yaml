@@ -40,6 +40,8 @@ properties:
     type: boolean
   split_logs_at_newline:
     type: boolean
+  split_as_array:
+    type: boolean
   write_timeout:
     type: string
 allOf:
