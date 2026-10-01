@@ -42,6 +42,8 @@ properties:
     type: boolean
   split_as_array:
     type: boolean
+  suppress_tls_handshake_eof:
+    type: boolean
   write_timeout:
     type: string
 allOf:
