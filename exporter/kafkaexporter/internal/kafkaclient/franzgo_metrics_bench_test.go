@@ -13,7 +13,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 	"go.opentelemetry.io/collector/component/componenttest"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/metadata"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/metadata"
 )
 
 func BenchmarkOnBrokerConnect(b *testing.B) {

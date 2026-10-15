@@ -6,11 +6,13 @@ package metadata
 
 import (
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/config/configoptional"
+	"go.opentelemetry.io/collector/exporter/exporterhelper"
 )
 
 var (
 	Type      = component.MustNewType("kafka")
-	ScopeName = "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter"
+	ScopeName = "github.com/cloudoperators/opentelemetry-collector-contrib/exporter/kafkaexporter"
 )
 
 const (
@@ -19,3 +21,8 @@ const (
 	MetricsStability  = component.StabilityLevelBeta
 	LogsStability     = component.StabilityLevelBeta
 )
+
+// NewDefaultSendingQueueConfig returns the sending queue default declared in metadata.yaml.
+func NewDefaultSendingQueueConfig() configoptional.Optional[exporterhelper.QueueBatchConfig] {
+	return configoptional.Some(exporterhelper.NewDefaultQueueConfig())
+}

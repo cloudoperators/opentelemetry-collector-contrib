@@ -6,17 +6,18 @@ import (
 	"errors"
 	"sync"
 
-	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+
+	"go.opentelemetry.io/collector/component"
 )
 
 func Meter(settings component.TelemetrySettings) metric.Meter {
-	return settings.MeterProvider.Meter("github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter")
+	return settings.MeterProvider.Meter("github.com/cloudoperators/opentelemetry-collector-contrib/exporter/kafkaexporter")
 }
 
 func Tracer(settings component.TelemetrySettings) trace.Tracer {
-	return settings.TracerProvider.Tracer("github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter")
+	return settings.TracerProvider.Tracer("github.com/cloudoperators/opentelemetry-collector-contrib/exporter/kafkaexporter")
 }
 
 // TelemetryBuilder provides an interface for components to report telemetry
