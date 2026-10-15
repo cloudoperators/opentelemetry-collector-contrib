@@ -1,11 +1,13 @@
-module github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter
+module github.com/cloudoperators/opentelemetry-collector-contrib/exporter/kafkaexporter
 
 go 1.26.0
 
 require (
+	github.com/cloudoperators/opentelemetry-collector-contrib/internal/coreinternal v0.147.0
+	github.com/cloudoperators/opentelemetry-collector-contrib/internal/kafka v0.147.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/jaegertracing/jaeger-idl v0.12.0
-	github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.161.0
+	github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter v0.161.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/internal/kafka v0.161.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/batchpersignal v0.161.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/kafka/configkafka v0.161.0
@@ -91,6 +93,7 @@ require (
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
+	github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.161.0 // indirect
 	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/core/xidutils v0.161.0 // indirect
 	github.com/openzipkin/zipkin-go v0.4.3 // indirect
 	github.com/pierrec/lz4/v4 v4.1.26 // indirect
@@ -120,11 +123,11 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 )
 
-replace github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal => ../../internal/coreinternal
+replace github.com/cloudoperators/opentelemetry-collector-contrib/internal/coreinternal => ../../internal/coreinternal
+
+replace github.com/cloudoperators/opentelemetry-collector-contrib/internal/kafka => ../../internal/kafka
 
 replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/core/xidutils => ../../pkg/core/xidutils
-
-replace github.com/open-telemetry/opentelemetry-collector-contrib/internal/kafka => ../../internal/kafka
 
 replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/batchpersignal => ../../pkg/batchpersignal
 

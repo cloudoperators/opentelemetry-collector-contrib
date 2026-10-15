@@ -27,11 +27,11 @@ import (
 	"go.opentelemetry.io/collector/pipeline/xpipeline"
 	"go.uber.org/zap"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/kafkaclient"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/marshaler"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/metadata"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/traceutil"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/kafka"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/kafkaclient"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/marshaler"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/metadata"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/internal/coreinternal/traceutil"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/internal/kafka"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/batchpersignal"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/kafka/topic"
 )
@@ -53,6 +53,14 @@ type messenger[T any] interface {
 	// or nil if message_key_from_metadata_key is not configured or the metadata
 	// value is absent.
 	getMessageKey(context.Context) []byte
+}
+
+// recordsBuffer is a pooled holder for a batch of kgo.Records. space owns
+// the record values; pointers[i] points to space[i] and is what the producer
+// API expects. Both slices are reused across exports.
+type recordsBuffer struct {
+	space    []kgo.Record
+	pointers []*kgo.Record
 }
 
 // recordsBuffer is a pooled holder for a batch of kgo.Records. space owns
