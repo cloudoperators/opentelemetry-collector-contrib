@@ -6,7 +6,7 @@
 // at https://github.com/opensearch-project/data-prepper/tree/main/data-prepper-plugins/opensearch/src/main/resources/index-template
 // and ensure date_nanos timestamps and typed dynamic-attribute mappings before
 // any documents are indexed.
-package templates // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/templates"
+package templates // import "github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/templates"
 
 import _ "embed"
 

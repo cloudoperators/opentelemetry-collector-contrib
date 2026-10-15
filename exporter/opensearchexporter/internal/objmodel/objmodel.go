@@ -30,7 +30,7 @@
 // document to OpenSearch.
 
 //nolint:errcheck
-package objmodel // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/objmodel"
+package objmodel // import "github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/objmodel"
 
 import (
 	"encoding/hex"

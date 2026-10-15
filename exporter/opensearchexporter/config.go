@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package opensearchexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/opensearchexporter"
+package opensearchexporter // import "github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter"
 
 import (
 	"errors"
@@ -48,6 +48,11 @@ type Config struct {
 	LogsIndexFallback   string `mapstructure:"logs_index_fallback"`
 	LogsIndexTimeFormat string `mapstructure:"logs_index_time_format"`
 
+	// LogsIndexOnError is the index to write failed log records to when a permanent indexing error occurs
+	// (e.g. mapper_parsing_exception). If empty, "on error" routing is disabled and permanent errors are
+	// returned to the pipeline as usual.
+	LogsIndexOnError string `mapstructure:"logs_index_on_error"`
+
 	// TracesIndex configures the index, index alias, or data stream name traces should be indexed in.
 	// https://opensearch.org/docs/latest/im-plugin/index/
 	// https://opensearch.org/docs/latest/dashboards/im-dashboards/datastream/
@@ -69,6 +74,21 @@ type Config struct {
 	// Pipeline is the optional ID of an ingest pipeline to apply when indexing documents.
 	// https://opensearch.org/docs/latest/ingest-pipelines/
 	Pipeline string `mapstructure:"pipeline"`
+
+	// ErrorClass defines custom error type class for "on error" routing.
+	// User-supplied classs override built-in defaults.
+	ErrorClass ErrorClassConfig `mapstructure:"error_class"`
+}
+
+// ErrorClassConfig allows customizing which OpenSearch error types are permanent vs transient.
+type ErrorClassConfig struct {
+	// Permanent lists error types that should be classified as permanent (not retriable).
+	// Examples: mapper_parsing_exception, illegal_argument_exception
+	Permanent []string `mapstructure:"permanent"`
+
+	// Transient lists error types that should be classified as transient (retriable).
+	// Examples: es_rejected_execution_exception, unavailable_shards_exception
+	Transient []string `mapstructure:"transient"`
 }
 
 var (

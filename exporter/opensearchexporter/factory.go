@@ -3,7 +3,7 @@
 
 //go:generate make mdatagen
 
-package opensearchexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/opensearchexporter"
+package opensearchexporter // import "github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter"
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/metadata"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/metadata"
 )
 
 // NewFactory creates a factory for OpenSearch exporter.
@@ -63,7 +63,10 @@ func createLogsExporter(ctx context.Context,
 	cfg component.Config,
 ) (exporter.Logs, error) {
 	c := cfg.(*Config)
-	le := newLogExporter(c, set)
+	le, err := newLogExporter(c, set)
+	if err != nil {
+		return nil, err
+	}
 
 	return exporterhelper.NewLogs(ctx, set, cfg,
 		le.pushLogData,

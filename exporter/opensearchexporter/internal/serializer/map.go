@@ -3,7 +3,7 @@
 
 // Inspired from "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/elasticsearchexporter/internal/serializer/map.go"
 
-package serializer // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/serializer"
+package serializer // import "github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/serializer"
 
 import (
 	"bytes"

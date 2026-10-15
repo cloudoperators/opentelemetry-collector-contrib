@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package opensearchexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/opensearchexporter"
+package opensearchexporter // import "github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter"
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/pdata/plog"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/pool"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/pool"
 )
 
 type logExporter struct {
@@ -25,9 +25,10 @@ type logExporter struct {
 	telemetry     component.TelemetrySettings
 	config        *Config
 	indexResolver *indexResolver
+	metrics       *exporterMetrics
 }
 
-func newLogExporter(cfg *Config, set exporter.Settings) *logExporter {
+func newLogExporter(cfg *Config, set exporter.Settings) (*logExporter, error) {
 	var model mappingModel
 	if cfg.MappingsSettings.Mode == MappingBodyMap.String() {
 		model = &bodyMapMappingModel{
@@ -47,6 +48,10 @@ func newLogExporter(cfg *Config, set exporter.Settings) *logExporter {
 		}
 	}
 
+	metrics, err := newExporterMetrics(set.TelemetrySettings)
+	if err != nil {
+		return nil, err
+	}
 	defaultPrefix := "ss4o_logs"
 	dataset := cfg.Dataset
 	namespace := cfg.Namespace
@@ -63,7 +68,8 @@ func newLogExporter(cfg *Config, set exporter.Settings) *logExporter {
 		model:         model,
 		config:        cfg,
 		indexResolver: newIndexResolver(defaultPrefix, dataset, namespace),
-	}
+		metrics:       metrics,
+	}, nil
 }
 
 func (l *logExporter) Start(ctx context.Context, host component.Host) error {
@@ -88,7 +94,7 @@ func (l *logExporter) Start(ctx context.Context, host component.Host) error {
 }
 
 func (l *logExporter) pushLogData(ctx context.Context, ld plog.Logs) error {
-	indexer := newLogBulkIndexer(l.bulkAction, l.model, l.config.Pipeline)
+	indexer := newLogBulkIndexer(l.bulkAction, l.model, l.config.Pipeline, &l.config.ErrorClass, l.config.LogsIndexOnError, l.metrics, l.telemetry.Logger)
 	startErr := indexer.start(l.client)
 	if startErr != nil {
 		return startErr
@@ -98,5 +104,10 @@ func (l *logExporter) pushLogData(ctx context.Context, ld plog.Logs) error {
 	logTimestamp := time.Now() // Replace with actual log timestamp extraction
 	indexer.submit(ctx, ld, l.indexResolver, l.config, logTimestamp)
 	indexer.close(ctx)
+
+	// Flush OnError errors are captured in indexer.errs and returned via joinedError
+	if err := indexer.flushOnErrorIndex(ctx, l.client); err != nil {
+		indexer.appendPermanentError(err)
+	}
 	return indexer.joinedError()
 }

@@ -3,7 +3,7 @@
 
 // Inspired from : "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/elasticsearchexporter/internal/pool/bufferpool.go"
 
-package pool // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/pool"
+package pool // import "github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/pool"
 
 import (
 	"bytes"
