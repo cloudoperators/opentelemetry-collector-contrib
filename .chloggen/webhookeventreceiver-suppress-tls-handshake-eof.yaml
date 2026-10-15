@@ -1,0 +1,11 @@
+change_type: enhancement
+
+component: receiver/webhookevent
+
+note: Downgrade benign TLS handshake EOF log lines caused by Layer-4 health probes
+
+issues: []
+
+subtext: Controlled by `suppress_tls_handshake_eof` (default true).
+
+change_logs: [user]

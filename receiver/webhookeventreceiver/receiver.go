@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package webhookeventreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/webhookeventreceiver"
+package webhookeventreceiver // import "github.com/cloudoperators/opentelemetry-collector-contrib/receiver/webhookeventreceiver"
 
 import (
 	"bufio"
@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	stdlog "log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -29,7 +30,7 @@ import (
 	"go.opentelemetry.io/collector/receiver/receiverhelper"
 	"go.uber.org/zap"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/webhookeventreceiver/internal/metadata"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/receiver/webhookeventreceiver/internal/metadata"
 )
 
 var (
@@ -139,6 +140,10 @@ func (er *eventReceiver) Start(ctx context.Context, host component.Host) error {
 	// set timeouts
 	er.server.ReadHeaderTimeout = readTimeout
 	er.server.WriteTimeout = writeTimeout
+
+	if er.cfg.SuppressTLSHandshakeEOF {
+		er.server.ErrorLog = stdlog.New(&tlsHandshakeEOFFilter{logger: er.settings.Logger}, "", 0)
+	}
 
 	// shutdown
 	er.shutdownWG.Go(func() {
@@ -328,4 +333,23 @@ func (er *eventReceiver) failBadReq(_ context.Context,
 		msg := string(jsonResp)
 		er.settings.Logger.Debug(msg, zap.Int("http_status_code", httpStatusCode), zap.Error(err))
 	}
+}
+
+// tlsHandshakeEOFFilter is an io.Writer wired into http.Server.ErrorLog that
+// downgrades "http: TLS handshake error from <addr>: EOF" lines to debug.
+// These occur when a client closes the TCP connection before sending any TLS
+// bytes, which is the signature of a Layer-4 health probe. All other error
+// log lines are passed through at error level.
+type tlsHandshakeEOFFilter struct {
+	logger *zap.Logger
+}
+
+func (f *tlsHandshakeEOFFilter) Write(p []byte) (int, error) {
+	msg := strings.TrimRight(string(p), "\n")
+	if strings.HasPrefix(msg, "http: TLS handshake error") && strings.HasSuffix(msg, ": EOF") {
+		f.logger.Debug(msg)
+	} else {
+		f.logger.Error(msg)
+	}
+	return len(p), nil
 }

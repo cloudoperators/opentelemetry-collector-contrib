@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package webhookeventreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/webhookeventreceiver"
+package webhookeventreceiver // import "github.com/cloudoperators/opentelemetry-collector-contrib/receiver/webhookeventreceiver"
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/xreceiver"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/webhookeventreceiver/internal/metadata"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/receiver/webhookeventreceiver/internal/metadata"
 )
 
 var scopeLogName = "otlp/" + metadata.Type.String()
@@ -56,6 +56,7 @@ func createDefaultConfig() component.Config {
 		ConvertHeadersToAttributes: false, // optional, off by default
 		SplitLogsAtNewLine:         false,
 		SplitLogsAtJSONBoundary:    false,
+		SuppressTLSHandshakeEOF:    true,
 	}
 }
 

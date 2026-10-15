@@ -20,7 +20,7 @@ import (
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/receivertest"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/webhookeventreceiver/internal/metadata"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/receiver/webhookeventreceiver/internal/metadata"
 )
 
 func TestReqToLog(t *testing.T) {
@@ -488,6 +488,48 @@ func TestReqToLog(t *testing.T) {
 				require.Contains(t, err.Error(), "limit is 102400 bytes")
 				// Should process 0 logs when error occurs
 				require.Equal(t, 0, reqLen)
+			},
+		},
+		{
+			desc: "JSON array split into individual log records",
+			sc: func() *bufio.Scanner {
+				reader := io.NopCloser(bytes.NewReader([]byte(`[{"@timestamp": "2026-08-20T10:00:00.000Z", "@version": "1", "message": "first log line", "host": "server1"},{"@timestamp": "2026-08-20T10:00:01.000Z", "@version": "1", "message": "second log line", "host": "server2"},{"@timestamp": "2026-08-20T10:00:02.000Z", "@version": "1", "message": "third log line", "host": "server1"}]`)))
+				return bufio.NewScanner(reader)
+			}(),
+			config: &Config{
+				Path:         defaultPath,
+				HealthPath:   defaultHealthPath,
+				ReadTimeout:  defaultReadTimeout,
+				WriteTimeout: defaultWriteTimeout,
+				SplitAsArray: true,
+			},
+			tt: func(t *testing.T, reqLog plog.Logs, reqLen int, err error, _ receiver.Settings) {
+				require.NoError(t, err)
+				require.Equal(t, 3, reqLen)
+
+				processLogRecords(reqLog, func(lr plog.LogRecord) {
+					body := lr.Body().Str()
+					require.Contains(t, body, "@timestamp")
+					require.Contains(t, body, "message")
+				})
+			},
+		},
+		{
+			desc: "non-array JSON with split_as_array returns single log",
+			sc: func() *bufio.Scanner {
+				reader := io.NopCloser(bytes.NewReader([]byte(`{"message": "single object"}`)))
+				return bufio.NewScanner(reader)
+			}(),
+			config: &Config{
+				Path:         defaultPath,
+				HealthPath:   defaultHealthPath,
+				ReadTimeout:  defaultReadTimeout,
+				WriteTimeout: defaultWriteTimeout,
+				SplitAsArray: true,
+			},
+			tt: func(t *testing.T, _ plog.Logs, reqLen int, err error, _ receiver.Settings) {
+				require.NoError(t, err)
+				require.Equal(t, 1, reqLen)
 			},
 		},
 		{

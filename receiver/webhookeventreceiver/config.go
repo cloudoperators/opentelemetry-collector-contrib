@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package webhookeventreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/webhookeventreceiver"
+package webhookeventreceiver // import "github.com/cloudoperators/opentelemetry-collector-contrib/receiver/webhookeventreceiver"
 
 import (
 	"errors"
@@ -34,9 +34,11 @@ type Config struct {
 	RequiredHeader             RequiredHeader          `mapstructure:"required_header"`               // optional setting to set a required header for all requests to have
 	SplitLogsAtNewLine         bool                    `mapstructure:"split_logs_at_newline"`         // optional setting to split logs into multiple log records
 	SplitLogsAtJSONBoundary    bool                    `mapstructure:"split_logs_at_json_boundary"`   // optional setting to split logs at JSON object boundaries
+	SplitAsArray               bool                    `mapstructure:"split_as_array"`                // optional setting to split a JSON array into multiple log records
 	ConvertHeadersToAttributes bool                    `mapstructure:"convert_headers_to_attributes"` // optional to convert all headers to attributes
 	HeaderAttributeRegex       string                  `mapstructure:"header_attribute_regex"`        // optional to convert headers matching a regex to log attributes
 	HMACSignature              HMACSignature           `mapstructure:"hmac_signature"`                // optional HMAC hex digest signature verification
+	SuppressTLSHandshakeEOF    bool                    `mapstructure:"suppress_tls_handshake_eof"`    // if true, downgrade "http: TLS handshake error ...: EOF" messages to debug (common with L4 health probers). Default is true.
 }
 
 type RequiredHeader struct {
@@ -99,8 +101,18 @@ func (cfg *Config) Validate() error {
 		errs = multierr.Append(errs, errRequiredHeader)
 	}
 
-	if cfg.SplitLogsAtNewLine && cfg.SplitLogsAtJSONBoundary {
-		errs = multierr.Append(errs, errors.New("split_logs_at_new_line and split_logs_at_json_boundary cannot be enabled at the same time"))
+	splitCount := 0
+	if cfg.SplitLogsAtNewLine {
+		splitCount++
+	}
+	if cfg.SplitLogsAtJSONBoundary {
+		splitCount++
+	}
+	if cfg.SplitAsArray {
+		splitCount++
+	}
+	if splitCount > 1 {
+		errs = multierr.Append(errs, errors.New("only one of split_logs_at_newline, split_logs_at_json_boundary, or split_as_array can be enabled at a time"))
 	}
 
 	if cfg.HMACSignature.Secret != "" || cfg.HMACSignature.Header != "" || cfg.HMACSignature.Prefix != "" {
@@ -128,4 +140,8 @@ func (cfg *Config) Validate() error {
 
 func (cfg *Config) ShouldSplitLogsAtJSONBoundary() bool {
 	return cfg.SplitLogsAtJSONBoundary
+}
+
+func (cfg *Config) ShouldSplitAsArray() bool {
+	return cfg.SplitAsArray
 }

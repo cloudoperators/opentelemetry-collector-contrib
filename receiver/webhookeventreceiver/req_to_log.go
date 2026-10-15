@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package webhookeventreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/webhookeventreceiver"
+package webhookeventreceiver // import "github.com/cloudoperators/opentelemetry-collector-contrib/receiver/webhookeventreceiver"
 
 import (
 	"bufio"
@@ -18,7 +18,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/webhookeventreceiver/internal/metadata"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/receiver/webhookeventreceiver/internal/metadata"
 )
 
 const (
@@ -62,6 +62,8 @@ func (er *eventReceiver) reqToLog(sc *bufio.Scanner,
 			lines = strings.Split(sc.Text(), "\n")
 		} else if er.cfg.ShouldSplitLogsAtJSONBoundary() {
 			lines = splitJSONObjects(sc.Text())
+		} else if er.cfg.ShouldSplitAsArray() {
+			lines = splitJSONArray(sc.Text())
 		}
 
 		for _, line := range lines {
@@ -130,5 +132,17 @@ func splitJSONObjects(data string) []string {
 		return []string{data}
 	}
 
+	return result
+}
+
+func splitJSONArray(data string) []string {
+	var raw []json.RawMessage
+	if err := json.Unmarshal([]byte(data), &raw); err != nil {
+		return []string{data}
+	}
+	result := make([]string, len(raw))
+	for i, r := range raw {
+		result[i] = string(r)
+	}
 	return result
 }

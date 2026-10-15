@@ -16,7 +16,7 @@ import (
 	"go.opentelemetry.io/collector/confmap/confmaptest"
 	"go.uber.org/multierr"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/webhookeventreceiver/internal/metadata"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/receiver/webhookeventreceiver/internal/metadata"
 )
 
 // only one validate check so far

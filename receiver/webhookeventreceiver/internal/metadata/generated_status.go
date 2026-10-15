@@ -11,7 +11,7 @@ import (
 var (
 	Type           = component.MustNewType("webhook_event")
 	DeprecatedType = component.MustNewType("webhookevent")
-	ScopeName      = "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/webhookeventreceiver"
+	ScopeName      = "github.com/cloudoperators/opentelemetry-collector-contrib/receiver/webhookeventreceiver"
 )
 
 const (
