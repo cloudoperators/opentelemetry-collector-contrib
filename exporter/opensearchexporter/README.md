@@ -252,12 +252,15 @@ Supports standard TLS settings as part of HTTP settings. See [TLS Configuration/
 
 ### Error Classification
 
-When an OpenSearch bulk response reports a per-item failure, the exporter stamps the failing log record with the following attributes so downstream components (routing, filtering, dead-letter pipelines) can act on them:
+When an OpenSearch bulk response reports a per-item failure, the exporter classifies it as `permanent` or `transient`. With `logs_index_on_error` set, a permanent failure is written to that index as a document whose `error` object holds:
 
-- `opensearch.error.type` — the OpenSearch error type (e.g. `mapper_parsing_exception`); `unknown` when the response does not include one.
-- `opensearch.error.reason` — the human-readable reason from OpenSearch; `unknown` when the response does not include one.
-- `opensearch.error.status` — the HTTP status returned for the item.
-- `opensearch.error.class` — either `permanent` or `transient`, indicating whether the failure is worth retrying.
+- `type` — the OpenSearch error type (e.g. `mapper_parsing_exception`); `unknown` when the response does not include one.
+- `reason` — the human-readable reason from OpenSearch; `unknown` when the response does not include one.
+- `status` — the HTTP status returned for the item.
+- `class` — `permanent` or `transient`.
+- `original_log` (and `original_log_1`, … for large documents) — the document that was rejected.
+
+The failed log records themselves are not modified, so a retried record is sent again exactly as it was received.
 
 Classification is decided in this order:
 1. User-supplied overrides under `error_class.permanent` / `error_class.transient` (matched by error type).

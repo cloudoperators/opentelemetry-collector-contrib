@@ -267,3 +267,44 @@ func TestLogBulkIndexerTimeoutDuringWorkerFlush(t *testing.T) {
 		return false
 	}, 500*time.Millisecond, 10*time.Millisecond, "late worker callbacks modified the retry payload")
 }
+
+// Records handed back for retry are re-encoded on the next attempt, so they must be the records
+// as received: error attributes stamped on them end up in the document and a strict mapping on
+// attributes rejects every retried record. The input batch must not be modified either.
+func TestLogBulkIndexerRetryPayloadIsUnmodified(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(bulkItems(t, r, func(i int, index string) map[string]any {
+			if strings.HasSuffix(index, "deadletter") {
+				return map[string]any{"_index": index, "status": 201}
+			}
+			switch i {
+			case 0:
+				return map[string]any{"_index": index, "status": 400, "error": map[string]any{"type": "mapper_parsing_exception", "reason": "failed to parse field"}}
+			case 1, 2:
+				return map[string]any{"_index": index, "status": 429, "error": map[string]any{"type": "es_rejected_execution_exception", "reason": "queue full"}}
+			default:
+				return map[string]any{"_index": index, "status": 201}
+			}
+		}))
+	}))
+	defer srv.Close()
+
+	ld := testLogs(4)
+	var m plog.JSONMarshaler
+	before, err := m.MarshalLogs(ld)
+	require.NoError(t, err)
+
+	err = pushThroughIndexer(t.Context(), t, srv, ld, "syslog-deadletter")
+	requireRetryAll(t, err, 2)
+
+	after, merr := m.MarshalLogs(ld)
+	require.NoError(t, merr)
+	assert.JSONEq(t, string(before), string(after), "input logs were modified")
+
+	logsErr, _ := errors.AsType[consumererror.Logs](err)
+	records := logsErr.Data().ResourceLogs().At(0).ScopeLogs().At(0).LogRecords()
+	for i := range records.Len() {
+		assert.Zero(t, records.At(i).Attributes().Len(), "retried record %d carries attributes: %v", i, records.At(i).Attributes().AsRaw())
+	}
+}

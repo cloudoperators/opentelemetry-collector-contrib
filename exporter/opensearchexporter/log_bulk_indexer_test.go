@@ -85,86 +85,106 @@ func TestProcessItemFailure(t *testing.T) {
 	}
 }
 
-func TestProcessItemFailureStampsAttributes(t *testing.T) {
+// onErrorFields returns the "error" object of the single on-error document lbi collected.
+func onErrorFields(t *testing.T, lbi *logBulkIndexer) map[string]any {
+	t.Helper()
+	if len(lbi.onErrorDocs) != 1 {
+		t.Fatalf("expected 1 on-error document, got %d", len(lbi.onErrorDocs))
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(lbi.onErrorDocs[0], &doc); err != nil {
+		t.Fatalf("unmarshal on-error document: %v", err)
+	}
+	fields, ok := doc["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("on-error document has no error object: %s", lbi.onErrorDocs[0])
+	}
+	return fields
+}
+
+func TestProcessItemFailureRecordsErrorDetails(t *testing.T) {
 	tests := []struct {
-		name           string
-		status         int
-		errType        string
-		errReason      string
-		expectType     string
-		expectReason   string
-		expectStatus   int64
-		expectClass    string
-		expectAttrsSet bool
+		name         string
+		status       int
+		errType      string
+		errReason    string
+		expectType   string
+		expectReason string
+		expectClass  string
 	}{
 		{
-			name:           "permanent mapping error stamps all attrs",
-			status:         400,
-			errType:        "mapper_parsing_exception",
-			errReason:      "failed to parse field",
-			expectType:     "mapper_parsing_exception",
-			expectReason:   "failed to parse field",
-			expectStatus:   400,
-			expectClass:    "permanent",
-			expectAttrsSet: true,
+			name:         "permanent mapping error",
+			status:       400,
+			errType:      "mapper_parsing_exception",
+			errReason:    "failed to parse field",
+			expectType:   "mapper_parsing_exception",
+			expectReason: "failed to parse field",
+			expectClass:  "permanent",
 		},
 		{
-			name:           "retryable 503 classified transient",
-			status:         503,
-			errType:        "es_rejected_execution_exception",
-			errReason:      "queue capacity exceeded",
-			expectType:     "es_rejected_execution_exception",
-			expectReason:   "queue capacity exceeded",
-			expectStatus:   503,
-			expectClass:    "transient",
-			expectAttrsSet: true,
+			name:        "retryable 503 classified transient",
+			status:      503,
+			errType:     "es_rejected_execution_exception",
+			errReason:   "queue capacity exceeded",
+			expectClass: "transient",
 		},
 		{
-			name:           "status without resp.Error stamps unknown fields",
-			status:         500,
-			expectType:     "unknown",
-			expectReason:   "unknown",
-			expectStatus:   500,
-			expectClass:    "transient",
-			expectAttrsSet: true,
+			name:        "status without resp.Error",
+			status:      500,
+			expectClass: "transient",
 		},
 		{
-			name:           "no status and no resp.Error stamps nothing",
-			status:         0,
-			expectAttrsSet: false,
+			name:         "4xx without resp.Error",
+			status:       404,
+			expectType:   "unknown",
+			expectReason: "unknown",
+			expectClass:  "permanent",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lbi := &logBulkIndexer{logger: zap.NewNop()}
+			lbi := &logBulkIndexer{onErrorIndex: "deadletter", logger: zap.NewNop()}
 			resp := bulkRespItemWithError(t, tt.status, tt.errType, tt.errReason)
 			logs := plog.NewLogs()
 			rs := logs.ResourceLogs().AppendEmpty()
 			ss := rs.ScopeLogs().AppendEmpty()
 			logRecord := ss.LogRecords().AppendEmpty()
+			logRecord.Body().SetStr("payload")
 
-			lbi.processItemFailure(t.Context(), resp, nil, logRecord, nil, rs.Resource(), rs.SchemaUrl(), ss.Scope(), ss.SchemaUrl())
+			lbi.processItemFailure(t.Context(), resp, nil, logRecord, []byte(`{"body":"payload"}`), rs.Resource(), rs.SchemaUrl(), ss.Scope(), ss.SchemaUrl())
 
-			attrs := logRecord.Attributes()
-			if !tt.expectAttrsSet {
-				if attrs.Len() != 0 {
-					t.Errorf("expected no attributes, got %d", attrs.Len())
+			if n := logRecord.Attributes().Len(); n != 0 {
+				t.Errorf("input record was modified: %v", logRecord.Attributes().AsRaw())
+			}
+			if tt.expectClass == "transient" {
+				if len(lbi.onErrorDocs) != 0 {
+					t.Errorf("transient error must not be written to the on-error index")
+				}
+				if got := lbi.retryLogs.LogRecordCount(); got != 1 {
+					t.Fatalf("expected 1 record for retry, got %d", got)
+				}
+				retried := lbi.retryLogs.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0)
+				if n := retried.Attributes().Len(); n != 0 {
+					t.Errorf("retried record carries attributes: %v", retried.Attributes().AsRaw())
 				}
 				return
 			}
-
-			if v, ok := attrs.Get("opensearch.error.type"); !ok || v.AsString() != tt.expectType {
-				t.Errorf("expected opensearch.error.type=%q, got ok=%v value=%q", tt.expectType, ok, v.AsString())
+			fields := onErrorFields(t, lbi)
+			if fields["type"] != tt.expectType {
+				t.Errorf("expected error.type=%q, got %v", tt.expectType, fields["type"])
 			}
-			if v, ok := attrs.Get("opensearch.error.reason"); !ok || v.AsString() != tt.expectReason {
-				t.Errorf("expected opensearch.error.reason=%q, got ok=%v value=%q", tt.expectReason, ok, v.AsString())
+			if fields["reason"] != tt.expectReason {
+				t.Errorf("expected error.reason=%q, got %v", tt.expectReason, fields["reason"])
 			}
-			if v, ok := attrs.Get("opensearch.error.status"); !ok || v.Int() != tt.expectStatus {
-				t.Errorf("expected opensearch.error.status=%d, got ok=%v value=%d", tt.expectStatus, ok, v.Int())
+			if fields["status"] != float64(tt.status) {
+				t.Errorf("expected error.status=%d, got %v", tt.status, fields["status"])
 			}
-			if v, ok := attrs.Get("opensearch.error.class"); !ok || v.AsString() != tt.expectClass {
-				t.Errorf("expected opensearch.error.class=%q, got ok=%v value=%q", tt.expectClass, ok, v.AsString())
+			if fields["class"] != tt.expectClass {
+				t.Errorf("expected error.class=%q, got %v", tt.expectClass, fields["class"])
+			}
+			if fields["original_log"] != `{"body":"payload"}` {
+				t.Errorf("expected original_log to hold the payload, got %v", fields["original_log"])
 			}
 		})
 	}
@@ -175,7 +195,7 @@ func TestProcessItemFailureUsesUserClassification(t *testing.T) {
 		Permanent: []string{"custom_permanent_error"},
 		Transient: []string{"custom_transient_error"},
 	}
-	lbi := &logBulkIndexer{errorClassification: cfg, logger: zap.NewNop()}
+	lbi := &logBulkIndexer{errorClassification: cfg, onErrorIndex: "deadletter", logger: zap.NewNop()}
 	// 500 status normally transient, but user override marks it permanent
 	resp := bulkRespItemWithError(t, 500, "custom_permanent_error", "")
 	logs := plog.NewLogs()
@@ -185,9 +205,11 @@ func TestProcessItemFailureUsesUserClassification(t *testing.T) {
 
 	lbi.processItemFailure(t.Context(), resp, nil, logRecord, nil, rs.Resource(), rs.SchemaUrl(), ss.Scope(), ss.SchemaUrl())
 
-	v, ok := logRecord.Attributes().Get("opensearch.error.class")
-	if !ok || v.AsString() != "permanent" {
-		t.Errorf("expected class=permanent from user override, got ok=%v value=%q", ok, v.AsString())
+	if got := onErrorFields(t, lbi)["class"]; got != "permanent" {
+		t.Errorf("expected class=permanent from user override, got %v", got)
+	}
+	if len(lbi.retryErrs) != 0 {
+		t.Errorf("permanent error must not be retried, got %v", lbi.retryErrs)
 	}
 }
 
