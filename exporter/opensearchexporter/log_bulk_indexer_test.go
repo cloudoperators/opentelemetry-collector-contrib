@@ -78,8 +78,8 @@ func TestProcessItemFailure(t *testing.T) {
 			ss := rs.ScopeLogs().AppendEmpty()
 			logRecord := ss.LogRecords().AppendEmpty()
 			lbi.processItemFailure(t.Context(), resp, nil, logRecord, nil, rs.Resource(), rs.SchemaUrl(), ss.Scope(), ss.SchemaUrl())
-			if len(lbi.errs) != tt.expectedErrs {
-				t.Errorf("expected %d errors, got %d", tt.expectedErrs, len(lbi.errs))
+			if got := len(lbi.errs) + len(lbi.retryErrs); got != tt.expectedErrs {
+				t.Errorf("expected %d errors, got %d", tt.expectedErrs, got)
 			}
 		})
 	}
@@ -212,7 +212,6 @@ func TestNewLogBulkIndexerWithPipeline(t *testing.T) {
 		})
 	}
 }
-
 
 func TestNewBulkIndexerItem(t *testing.T) {
 	lbi := &logBulkIndexer{bulkAction: "index"}

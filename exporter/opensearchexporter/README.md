@@ -265,6 +265,8 @@ Classification is decided in this order:
 3. Built-in transient types: `es_rejected_execution_exception`, `unavailable_shards_exception`, `cluster_block_exception`, `timeout_exception`, `circuit_breaking_exception`.
 4. Fallback to HTTP status: `429`, `500`, `502`, `503`, `504` are transient; everything else is permanent.
 
+Transient item failures and failures of the whole bulk request (timeouts, connection errors, HTTP `429`/`5xx` responses) are returned as retryable errors, so `retry_on_failure` applies to them instead of the batch being dropped. Each attempt is bounded by `timeout` and no new attempt is started after `retry_on_failure.max_elapsed_time`, so `max_elapsed_time` has to be larger than `timeout` for a timed-out bulk request to be retried.
+
 Configuration:
 
 ```yaml

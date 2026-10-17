@@ -8,9 +8,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/opensearch-project/opensearch-go/v4/opensearchapi"
@@ -32,6 +32,20 @@ type logBulkIndexer struct {
 	onErrorDocs         [][]byte
 	metrics             *exporterMetrics
 	logger              *zap.Logger
+	submitted           plog.Logs
+
+	// mu guards errs, onErrorDocs and the retry fields. Item callbacks run on the bulk indexer's
+	// worker goroutine, which can outlive close when the context expires during a flush.
+	mu sync.Mutex
+	// retryErrs and retryLogs collect every record that failed with a retryable error, so the
+	// exporterhelper retry sender gets one consumererror.Logs that carries all of them. It only
+	// picks the first consumererror.Logs out of a joined error, so one error per record loses data.
+	retryErrs []error
+	retryLogs plog.Logs
+	// batchRetryErr is set when Close gave up before every item was flushed or reported because
+	// the context expired. The whole submitted batch is returned for retry, and callbacks that
+	// still arrive from the worker are ignored so they do not touch the records being retried.
+	batchRetryErr error
 }
 
 func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, errorClassification *ErrorClassConfig, onErrorIndex string, metrics *exporterMetrics, logger *zap.Logger) *logBulkIndexer {
@@ -54,35 +68,115 @@ func (lbi *logBulkIndexer) start(client *opensearchapi.Client) error {
 	return startErr
 }
 
+// joinedError returns the error for the whole push. Retryable records win over permanent ones:
+// permanent failures were already routed to the on-error index or counted, and returning a
+// permanent error here would stop the retry sender from retrying the retryable records.
 func (lbi *logBulkIndexer) joinedError() error {
-	return errors.Join(lbi.errs...)
+	lbi.mu.Lock()
+	defer lbi.mu.Unlock()
+	permanent := errors.Join(lbi.errs...)
+	var retryData plog.Logs
+	var retryErr error
+	switch {
+	case lbi.batchRetryErr != nil && lbi.submitted != (plog.Logs{}):
+		retryData = lbi.submitted
+		retryErr = errors.Join(distinctErrors(append([]error{lbi.batchRetryErr}, lbi.retryErrs...))...)
+	case lbi.retryLogs != (plog.Logs{}) && lbi.retryLogs.LogRecordCount() > 0:
+		retryData = lbi.retryLogs
+		retryErr = errors.Join(distinctErrors(lbi.retryErrs)...)
+	default:
+		return permanent
+	}
+	if permanent != nil {
+		// Keep the message but not the error chain: a Permanent marker in it would stop the retry.
+		retryErr = errors.Join(retryErr, errors.New("also failed permanently: "+permanent.Error()))
+	}
+	return consumererror.NewLogs(retryErr, retryData)
+}
+
+// distinctErrors drops errors whose message was already seen. A failed bulk request reports the
+// same error once per record, which would otherwise repeat it thousands of times in the log.
+func distinctErrors(errs []error) []error {
+	seen := make(map[string]struct{}, len(errs))
+	out := make([]error, 0, len(errs))
+	for _, err := range errs {
+		msg := err.Error()
+		if _, ok := seen[msg]; ok {
+			continue
+		}
+		seen[msg] = struct{}{}
+		out = append(out, err)
+	}
+	return out
 }
 
 func (lbi *logBulkIndexer) close(ctx context.Context) {
 	closeErr := lbi.bulkIndexer.Close(ctx)
-	if closeErr != nil {
-		lbi.logger.Debug("main bulk indexer close returned error", zap.Error(closeErr))
-		lbi.errs = append(lbi.errs, closeErr)
+	if closeErr == nil {
+		return
+	}
+	lbi.logger.Debug("main bulk indexer close returned error", zap.Error(closeErr))
+	lbi.mu.Lock()
+	defer lbi.mu.Unlock()
+	if isRetryableError(closeErr) {
+		// Close only returns an error when ctx is done before the workers finished,
+		// so some items were neither flushed nor reported. Retry the whole batch.
+		lbi.batchRetryErr = closeErr
+		return
+	}
+	lbi.addPermanentError(closeErr)
+}
+
+// onIndexerError handles bulk-request level errors. Every one of them is also reported per item
+// (OnFailure for a failed flush, an error from Add or Close otherwise), so retryable errors are
+// only logged here and the affected records are collected where they are reported.
+func (lbi *logBulkIndexer) onIndexerError(_ context.Context, indexerErr error) {
+	if indexerErr == nil {
+		return
+	}
+	if isRetryableError(indexerErr) {
+		lbi.logger.Debug("opensearch bulk indexer retryable transport error", zap.Error(indexerErr))
+		return
+	}
+	lbi.logger.Debug("opensearch bulk indexer transport error", zap.Error(indexerErr))
+	lbi.mu.Lock()
+	defer lbi.mu.Unlock()
+	if lbi.batchRetryErr == nil {
+		lbi.addPermanentError(indexerErr)
 	}
 }
 
-func (lbi *logBulkIndexer) onIndexerError(_ context.Context, indexerErr error) {
+// onErrorIndexerError keeps the old behavior for the on-error (dead-letter) indexer.
+func (lbi *logBulkIndexer) onErrorIndexerError(_ context.Context, indexerErr error) {
 	if indexerErr != nil {
-		lbi.logger.Debug("opensearch bulk indexer transport error", zap.Error(indexerErr))
-		lbi.appendPermanentError(consumererror.NewPermanent(indexerErr))
+		lbi.logger.Debug("opensearch on-error bulk indexer transport error", zap.Error(indexerErr))
+		lbi.appendPermanentError(indexerErr)
 	}
 }
 
 func (lbi *logBulkIndexer) appendPermanentError(e error) {
+	lbi.mu.Lock()
+	defer lbi.mu.Unlock()
+	lbi.addPermanentError(e)
+}
+
+// addPermanentError requires lbi.mu.
+func (lbi *logBulkIndexer) addPermanentError(e error) {
 	lbi.errs = append(lbi.errs, consumererror.NewPermanent(e))
 }
 
+// appendRetryLogError requires lbi.mu.
 func (lbi *logBulkIndexer) appendRetryLogError(err error, log plog.Logs) {
-	lbi.errs = append(lbi.errs, consumererror.NewLogs(err, log))
+	lbi.retryErrs = append(lbi.retryErrs, err)
+	if lbi.retryLogs == (plog.Logs{}) {
+		lbi.retryLogs = plog.NewLogs()
+	}
+	log.ResourceLogs().MoveAndAppendTo(lbi.retryLogs.ResourceLogs())
 }
 
 func (lbi *logBulkIndexer) submit(ctx context.Context, ld plog.Logs, ir *indexResolver, cfg *Config, timestamp time.Time) {
 	lbi.logger.Debug("opensearch log bulk indexer submit", zap.Int("resource_log_count", ld.ResourceLogs().Len()), zap.String("logs_index", cfg.LogsIndex), zap.String("on_error_index", lbi.onErrorIndex))
+	lbi.submitted = ld
 	keys := ir.extractPlaceholderKeys(cfg.LogsIndex)
 	timeSuffix := ir.calculateTimeSuffix(cfg.LogsIndexTimeFormat, timestamp)
 	resourceLogs := ld.ResourceLogs()
@@ -115,6 +209,12 @@ func (lbi *logBulkIndexer) processItem(ctx context.Context, indexName string, re
 		lbi.appendPermanentError(err)
 	} else {
 		ItemFailureHandler := func(itemCtx context.Context, _ opensearchutil.BulkIndexerItem, resp opensearchapi.BulkRespItem, itemErr error) {
+			lbi.mu.Lock()
+			defer lbi.mu.Unlock()
+			if lbi.batchRetryErr != nil {
+				// The whole batch is already being retried.
+				return
+			}
 			lbi.processItemFailure(itemCtx, resp, itemErr, logRecord, payload, resource, resourceSchemaURL, scope, scopeSchemaURL)
 		}
 		bi := lbi.newBulkIndexerItem(payload, indexName)
@@ -122,7 +222,9 @@ func (lbi *logBulkIndexer) processItem(ctx context.Context, indexName string, re
 		err = lbi.bulkIndexer.Add(ctx, bi)
 		if err != nil {
 			lbi.logger.Debug("failed to enqueue log item to bulk indexer, will retry", zap.Error(err), zap.String("index", indexName))
+			lbi.mu.Lock()
 			lbi.appendRetryLogError(err, makeLog(resource, resourceSchemaURL, scope, scopeSchemaURL, logRecord))
+			lbi.mu.Unlock()
 		}
 	}
 }
@@ -143,6 +245,7 @@ func makeLog(resource pcommon.Resource, resourceSchemaURL string, scope pcommon.
 	return logs
 }
 
+// processItemFailure requires lbi.mu.
 func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensearchapi.BulkRespItem, itemErr error, originalLogRecord plog.LogRecord, originalPayload []byte, resource pcommon.Resource, resourceSchemaURL string, scope pcommon.InstrumentationScope, scopeSchemaURL string) {
 	lbi.logger.Debug("opensearch item failure callback fired", zap.Int("status", resp.Status), zap.String("index", resp.Index))
 	logs, class := lbi.formatItemError(resp, originalLogRecord, resource, resourceSchemaURL, scope, scopeSchemaURL)
@@ -180,14 +283,13 @@ func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensear
 			if lbi.metrics != nil {
 				lbi.metrics.recordPermanentError(ctx, errType, class, resp.Status, resp.Index)
 			}
-			lbi.appendPermanentError(responseAsError(resp))
+			lbi.addPermanentError(responseAsError(resp))
 		}
 
 	default:
-		// Transport/network errors or unexpected issues from bulk indexer
-		var netErr net.Error
-		if errors.As(itemErr, &netErr) {
-			// Network error (connection refused, timeout, etc.) — retry
+		// Transport/network errors or unexpected issues from bulk indexer. A failed bulk request
+		// (timeout, HTTP 429/5xx, connection reset) lands here for every item with an empty resp.
+		if isRetryableError(itemErr) {
 			lbi.logger.Debug("opensearch item network error, will retry", zap.Error(itemErr), zap.String("index", resp.Index))
 			if lbi.metrics != nil {
 				lbi.metrics.recordTransientError(ctx, "network_error", resp.Index)
@@ -199,7 +301,7 @@ func (lbi *logBulkIndexer) processItemFailure(ctx context.Context, resp opensear
 			if lbi.metrics != nil {
 				lbi.metrics.recordPermanentError(ctx, "unknown", "permanent", 0, resp.Index)
 			}
-			lbi.appendPermanentError(itemErr)
+			lbi.addPermanentError(itemErr)
 		}
 	}
 }
@@ -279,6 +381,7 @@ func trimReasonPreview(reason string) string {
 	return reason
 }
 
+// submitToOnError requires lbi.mu.
 func (lbi *logBulkIndexer) submitToOnError(_ context.Context, resp opensearchapi.BulkRespItem, originalPayload []byte) {
 	errType := "unknown"
 	errReason := "unknown"
@@ -306,25 +409,31 @@ func (lbi *logBulkIndexer) submitToOnError(_ context.Context, resp opensearchapi
 	doc, err := json.Marshal(envelope)
 	if err != nil {
 		lbi.logger.Debug("failed to marshal on-error envelope, dropping", zap.Error(err), zap.String("on_error_index", lbi.onErrorIndex))
-		lbi.appendPermanentError(err)
+		lbi.addPermanentError(err)
 		return
 	}
 	lbi.onErrorDocs = append(lbi.onErrorDocs, doc)
 }
 
 func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opensearchapi.Client) error {
-	if len(lbi.onErrorDocs) == 0 {
+	lbi.mu.Lock()
+	docs := lbi.onErrorDocs
+	if lbi.batchRetryErr != nil {
+		// The whole batch is retried, and its permanent failures are routed again then.
+		docs = nil
+	}
+	lbi.mu.Unlock()
+	if len(docs) == 0 {
 		return nil
 	}
-	lbi.logger.Debug("flushing documents to on-error index", zap.Int("doc_count", len(lbi.onErrorDocs)), zap.String("on_error_index", lbi.onErrorIndex), zap.String("bulk_action", lbi.bulkAction))
+	lbi.logger.Debug("flushing documents to on-error index", zap.Int("doc_count", len(docs)), zap.String("on_error_index", lbi.onErrorIndex), zap.String("bulk_action", lbi.bulkAction))
 
-	onErrorIndexer, err := newLogOpenSearchBulkIndexer(client, lbi.onIndexerError, lbi.pipeline)
+	onErrorIndexer, err := newLogOpenSearchBulkIndexer(client, lbi.onErrorIndexerError, lbi.pipeline)
 	if err != nil {
 		lbi.logger.Debug("failed to create on-error bulk indexer", zap.Error(err), zap.String("on_error_index", lbi.onErrorIndex))
 		return err
 	}
-	for _, doc := range lbi.onErrorDocs {
-		doc := doc
+	for _, doc := range docs {
 		item := opensearchutil.BulkIndexerItem{
 			Action: lbi.bulkAction,
 			Index:  lbi.onErrorIndex,
