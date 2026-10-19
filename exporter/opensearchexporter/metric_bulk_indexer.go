@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"net"
 	"time"
 
 	"github.com/opensearch-project/opensearch-go/v4/opensearchapi"
@@ -227,34 +226,6 @@ func (mbi *metricBulkIndexer) processItemFailure(resp opensearchapi.BulkRespItem
 			mbi.appendPermanentError(itemErr)
 		}
 	}
-}
-
-// isRetryableError reports whether err is a transient transport/flush failure
-// (connection refused, timeout, DNS) that should be retried rather than dropped
-// as permanent. Encoding failures, which never leave the process, are not
-// transport errors and remain permanent.
-//
-// The net.Error check is deliberately broad. It also matches durable
-// misconfigurations that arrive wrapped in *net.OpError or *url.Error, such as
-// an untrusted certificate or a hostname that does not resolve, so those are
-// retried until the retry sender gives up rather than dropped immediately. That
-// is bounded by max_elapsed_time and is the safer default: misclassifying a
-// transient failure as permanent loses data, whereas misclassifying a permanent
-// one only costs retries.
-//
-// context.Canceled is included because a cancelled context reaches this path as
-// a flush failure for data that was never accepted. Treating it as permanent
-// would drop that batch on shutdown; treating it as retryable lets the retry
-// sender return immediately on ctx.Done() and leave the data to the queue.
-func isRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return true
-	}
-	var netErr net.Error
-	return errors.As(err, &netErr)
 }
 
 func (mbi *metricBulkIndexer) newBulkIndexerItem(document []byte, indexName string) opensearchutil.BulkIndexerItem {
