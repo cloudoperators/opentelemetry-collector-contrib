@@ -78,6 +78,13 @@ type Config struct {
 	// ErrorClass defines custom error type class for "on error" routing.
 	// User-supplied classs override built-in defaults.
 	ErrorClass ErrorClassConfig `mapstructure:"error_class"`
+
+	// FlushBytes sets the threshold in bytes at which the bulk indexer flushes
+	// buffered documents to OpenSearch in a single _bulk request. Larger values
+	// reduce the number of HTTP round-trips at the cost of higher per-request
+	// memory and latency. When set to 0 (default), the opensearch-go client
+	// library default of 5 MB is used.
+	FlushBytes int `mapstructure:"flush_bytes"`
 }
 
 // ErrorClassConfig allows customizing which OpenSearch error types are permanent vs transient.

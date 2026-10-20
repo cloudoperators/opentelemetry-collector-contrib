@@ -24,6 +24,7 @@ import (
 type logBulkIndexer struct {
 	bulkAction          string
 	pipeline            string
+	flushBytes          int
 	model               mappingModel
 	errs                []error
 	bulkIndexer         opensearchutil.BulkIndexer
@@ -48,10 +49,11 @@ type logBulkIndexer struct {
 	batchRetryErr error
 }
 
-func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, errorClassification *ErrorClassConfig, onErrorIndex string, metrics *exporterMetrics, logger *zap.Logger) *logBulkIndexer {
+func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, errorClassification *ErrorClassConfig, onErrorIndex string, metrics *exporterMetrics, logger *zap.Logger, flushBytes int) *logBulkIndexer {
 	return &logBulkIndexer{
 		bulkAction:          bulkAction,
 		pipeline:            pipeline,
+		flushBytes:          flushBytes,
 		model:               model,
 		errs:                nil,
 		bulkIndexer:         nil,
@@ -64,7 +66,7 @@ func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, e
 
 func (lbi *logBulkIndexer) start(client *opensearchapi.Client) error {
 	var startErr error
-	lbi.bulkIndexer, startErr = newLogOpenSearchBulkIndexer(client, lbi.onIndexerError, lbi.pipeline)
+	lbi.bulkIndexer, startErr = newLogOpenSearchBulkIndexer(client, lbi.onIndexerError, lbi.pipeline, lbi.flushBytes)
 	return startErr
 }
 
@@ -314,9 +316,10 @@ func (lbi *logBulkIndexer) newBulkIndexerItem(document []byte, indexName string)
 	return item
 }
 
-func newLogOpenSearchBulkIndexer(client *opensearchapi.Client, onIndexerError func(context.Context, error), pipeline string) (opensearchutil.BulkIndexer, error) {
+func newLogOpenSearchBulkIndexer(client *opensearchapi.Client, onIndexerError func(context.Context, error), pipeline string, flushBytes int) (opensearchutil.BulkIndexer, error) {
 	return opensearchutil.NewBulkIndexer(opensearchutil.BulkIndexerConfig{
 		NumWorkers: 1,
+		FlushBytes: flushBytes,
 		Client:     client,
 		OnError:    onIndexerError,
 		Pipeline:   pipeline,
@@ -403,7 +406,7 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 	}
 	lbi.logger.Debug("flushing documents to on-error index", zap.Int("doc_count", len(docs)), zap.String("on_error_index", lbi.onErrorIndex), zap.String("bulk_action", lbi.bulkAction))
 
-	onErrorIndexer, err := newLogOpenSearchBulkIndexer(client, lbi.onErrorIndexerError, lbi.pipeline)
+	onErrorIndexer, err := newLogOpenSearchBulkIndexer(client, lbi.onErrorIndexerError, lbi.pipeline, 0)
 	if err != nil {
 		lbi.logger.Debug("failed to create on-error bulk indexer", zap.Error(err), zap.String("on_error_index", lbi.onErrorIndex))
 		return err

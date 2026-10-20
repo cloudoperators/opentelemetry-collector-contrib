@@ -68,7 +68,7 @@ func (m *metricExporter) Start(ctx context.Context, host component.Host) error {
 }
 
 func (m *metricExporter) pushMetricData(ctx context.Context, md pmetric.Metrics) error {
-	indexer := newMetricBulkIndexer(m.bulkAction, m.model, m.config.Pipeline)
+	indexer := newMetricBulkIndexer(m.bulkAction, m.model, m.config.Pipeline, m.config.FlushBytes)
 	startErr := indexer.start(m.client)
 	if startErr != nil {
 		return startErr
