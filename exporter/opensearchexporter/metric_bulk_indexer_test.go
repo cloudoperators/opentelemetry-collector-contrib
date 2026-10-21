@@ -113,7 +113,7 @@ func TestNewMetricBulkIndexerWithPipeline(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mbi := newMetricBulkIndexer("create", nil, tt.pipeline)
+			mbi := newMetricBulkIndexer("create", nil, tt.pipeline, 0)
 			if mbi.pipeline != tt.pipeline {
 				t.Errorf("expected pipeline %q, got %q", tt.pipeline, mbi.pipeline)
 			}

@@ -19,18 +19,19 @@ import (
 type metricBulkIndexer struct {
 	bulkAction  string
 	pipeline    string
+	flushBytes  int
 	model       mappingModel
 	errs        []error
 	bulkIndexer opensearchutil.BulkIndexer
 }
 
-func newMetricBulkIndexer(bulkAction string, model mappingModel, pipeline string) *metricBulkIndexer {
-	return &metricBulkIndexer{bulkAction: bulkAction, pipeline: pipeline, model: model, errs: nil, bulkIndexer: nil}
+func newMetricBulkIndexer(bulkAction string, model mappingModel, pipeline string, flushBytes int) *metricBulkIndexer {
+	return &metricBulkIndexer{bulkAction: bulkAction, pipeline: pipeline, flushBytes: flushBytes, model: model, errs: nil, bulkIndexer: nil}
 }
 
 func (mbi *metricBulkIndexer) start(client *opensearchapi.Client) error {
 	var startErr error
-	mbi.bulkIndexer, startErr = newOpenSearchBulkIndexer(client, mbi.onIndexerError, mbi.pipeline)
+	mbi.bulkIndexer, startErr = newOpenSearchBulkIndexer(client, mbi.onIndexerError, mbi.pipeline, mbi.flushBytes)
 	return startErr
 }
 
