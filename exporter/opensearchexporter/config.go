@@ -110,6 +110,7 @@ var (
 	errOTelV1DatasetNamespaceUnused   = errors.New(`dataset and namespace are not used by mapping.mode "otel-v1"; remove them or pick a different mode`)
 	errMetricsMappingModeUnsupported  = errors.New(`metrics are only supported by mapping.mode "ss4o" and "otel-v1"`)
 	errManageIndexTemplateInvalidMode = errors.New("mapping.manage_index_template is only supported with mapping.mode \"otel-v1\"")
+	errFlushBytesInvalid              = errors.New("flush_bytes must be between 0 and 100000000 (100 MB)")
 )
 
 type MappingsSettings struct {
@@ -263,6 +264,10 @@ func (cfg *Config) Validate() error {
 
 	if cfg.MappingsSettings.ManageIndexTemplate && cfg.MappingsSettings.Mode != MappingOTelV1.String() {
 		multiErr = append(multiErr, errManageIndexTemplateInvalidMode)
+	}
+
+	if cfg.FlushBytes < 0 || cfg.FlushBytes > 100_000_000 {
+		multiErr = append(multiErr, errFlushBytesInvalid)
 	}
 
 	return errors.Join(multiErr...)

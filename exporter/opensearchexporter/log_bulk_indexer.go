@@ -406,7 +406,7 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 	}
 	lbi.logger.Debug("flushing documents to on-error index", zap.Int("doc_count", len(docs)), zap.String("on_error_index", lbi.onErrorIndex), zap.String("bulk_action", lbi.bulkAction))
 
-	onErrorIndexer, err := newLogOpenSearchBulkIndexer(client, lbi.onErrorIndexerError, lbi.pipeline, 0)
+	onErrorIndexer, err := newLogOpenSearchBulkIndexer(client, lbi.onErrorIndexerError, lbi.pipeline, lbi.flushBytes)
 	if err != nil {
 		lbi.logger.Debug("failed to create on-error bulk indexer", zap.Error(err), zap.String("on_error_index", lbi.onErrorIndex))
 		return err
