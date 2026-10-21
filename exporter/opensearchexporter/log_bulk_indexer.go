@@ -25,6 +25,7 @@ type logBulkIndexer struct {
 	bulkAction          string
 	pipeline            string
 	flushBytes          int
+	numWorkers          int
 	model               mappingModel
 	errs                []error
 	bulkIndexer         opensearchutil.BulkIndexer
@@ -49,10 +50,11 @@ type logBulkIndexer struct {
 	batchRetryErr error
 }
 
-func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, errorClassification *ErrorClassConfig, onErrorIndex string, metrics *exporterMetrics, logger *zap.Logger, flushBytes int) *logBulkIndexer {
+func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, errorClassification *ErrorClassConfig, onErrorIndex string, metrics *exporterMetrics, logger *zap.Logger, numWorkers int, flushBytes int) *logBulkIndexer {
 	return &logBulkIndexer{
 		bulkAction:          bulkAction,
 		pipeline:            pipeline,
+		numWorkers:          numWorkers,
 		flushBytes:          flushBytes,
 		model:               model,
 		errs:                nil,
@@ -66,7 +68,7 @@ func newLogBulkIndexer(bulkAction string, model mappingModel, pipeline string, e
 
 func (lbi *logBulkIndexer) start(client *opensearchapi.Client) error {
 	var startErr error
-	lbi.bulkIndexer, startErr = newLogOpenSearchBulkIndexer(client, lbi.onIndexerError, lbi.pipeline, lbi.flushBytes)
+	lbi.bulkIndexer, startErr = newLogOpenSearchBulkIndexer(client, lbi.onIndexerError, lbi.pipeline, lbi.numWorkers, lbi.flushBytes)
 	return startErr
 }
 
@@ -316,9 +318,14 @@ func (lbi *logBulkIndexer) newBulkIndexerItem(document []byte, indexName string)
 	return item
 }
 
-func newLogOpenSearchBulkIndexer(client *opensearchapi.Client, onIndexerError func(context.Context, error), pipeline string, flushBytes int) (opensearchutil.BulkIndexer, error) {
+func newLogOpenSearchBulkIndexer(client *opensearchapi.Client, onIndexerError func(context.Context, error), pipeline string, numWorkers int, flushBytes int) (opensearchutil.BulkIndexer, error) {
+	// 0 numWorkers will cause a Close() panic as nothing drains the queue.
+	// Setting any unset numWorkers field or 0 value to 1 as a default.
+	if numWorkers < 1 {
+		numWorkers = 1
+	}
 	return opensearchutil.NewBulkIndexer(opensearchutil.BulkIndexerConfig{
-		NumWorkers: 1,
+		NumWorkers: numWorkers,
 		FlushBytes: flushBytes,
 		Client:     client,
 		OnError:    onIndexerError,
@@ -406,7 +413,7 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 	}
 	lbi.logger.Debug("flushing documents to on-error index", zap.Int("doc_count", len(docs)), zap.String("on_error_index", lbi.onErrorIndex), zap.String("bulk_action", lbi.bulkAction))
 
-	onErrorIndexer, err := newLogOpenSearchBulkIndexer(client, lbi.onErrorIndexerError, lbi.pipeline, lbi.flushBytes)
+	onErrorIndexer, err := newLogOpenSearchBulkIndexer(client, lbi.onErrorIndexerError, lbi.pipeline, lbi.numWorkers, lbi.flushBytes)
 	if err != nil {
 		lbi.logger.Debug("failed to create on-error bulk indexer", zap.Error(err), zap.String("on_error_index", lbi.onErrorIndex))
 		return err

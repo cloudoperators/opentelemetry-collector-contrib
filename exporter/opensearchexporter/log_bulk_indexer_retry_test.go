@@ -104,7 +104,7 @@ func pushThroughIndexer(ctx context.Context, t *testing.T, srv *httptest.Server,
 	client, err := newOpenSearchClient(srv.URL, srv.Client(), zap.NewNop())
 	require.NoError(t, err)
 	cfg := &Config{LogsIndex: "syslog", BulkAction: "create"}
-	lbi := newLogBulkIndexer("create", &encodeModel{}, "", &ErrorClassConfig{}, onErrorIndex, nil, zap.NewNop(), 0)
+	lbi := newLogBulkIndexer("create", &encodeModel{}, "", &ErrorClassConfig{}, onErrorIndex, nil, zap.NewNop(), 1, 0)
 	require.NoError(t, lbi.start(client))
 	lbi.submit(ctx, ld, newIndexResolver("ss4o_logs", "", ""), cfg, time.Now())
 	lbi.close(ctx)
