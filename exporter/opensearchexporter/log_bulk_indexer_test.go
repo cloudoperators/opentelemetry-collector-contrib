@@ -224,7 +224,7 @@ func TestNewLogBulkIndexerWithPipeline(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lbi := newLogBulkIndexer("create", nil, tt.pipeline, nil, "", nil, zap.NewNop(), 1, 0)
+			lbi := newLogBulkIndexer("create", nil, tt.pipeline, nil, "", nil, zap.NewNop(), 0)
 			if lbi.pipeline != tt.pipeline {
 				t.Errorf("expected pipeline %q, got %q", tt.pipeline, lbi.pipeline)
 			}

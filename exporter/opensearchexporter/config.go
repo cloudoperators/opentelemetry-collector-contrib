@@ -85,13 +85,6 @@ type Config struct {
 	// memory and latency. When set to 0 (default), the opensearch-go client
 	// library default of 5 MB is used.
 	FlushBytes int `mapstructure:"flush_bytes"`
-
-	// NumWorkers sets the number of concurrent workers the bulk indexer uses to
-	// drain buffered documents into OpenSearch. More workers increase in-flight
-	// _bulk requests per push, higher throughput vs. more memory. Valid range is
-	// 0-32, 0 will default to 1 worker. In a Kubernetes environment, size it
-	// against the pod CPU limitand the OpenSearch write thread pool
-	NumWorkers int `mapstructure:"num_workers"`
 }
 
 // ErrorClassConfig allows customizing which OpenSearch error types are permanent vs transient.
@@ -118,7 +111,6 @@ var (
 	errMetricsMappingModeUnsupported  = errors.New(`metrics are only supported by mapping.mode "ss4o" and "otel-v1"`)
 	errManageIndexTemplateInvalidMode = errors.New("mapping.manage_index_template is only supported with mapping.mode \"otel-v1\"")
 	errFlushBytesInvalid              = errors.New("flush_bytes must be between 0 and 100000000 (100 MB)")
-	errNumWorkersInvalid              = errors.New("num_workers must be between 0 and 32 (0 defaults to 1 worker)")
 )
 
 type MappingsSettings struct {
@@ -277,9 +269,7 @@ func (cfg *Config) Validate() error {
 	if cfg.FlushBytes < 0 || cfg.FlushBytes > 100_000_000 {
 		multiErr = append(multiErr, errFlushBytesInvalid)
 	}
-	if cfg.NumWorkers < 0 || cfg.NumWorkers > 32 {
-		multiErr = append(multiErr, errNumWorkersInvalid)
-	}
+
 	return errors.Join(multiErr...)
 }
 
