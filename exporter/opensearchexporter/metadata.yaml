@@ -22,6 +22,9 @@ attributes:
   error_type:
     description: The type of error encountered
     type: string
+  failure_stage:
+    description: The pipeline stage where the on-error delivery failed
+    type: string
   index:
     description: The OpenSearch index name
     type: string
@@ -43,9 +46,9 @@ telemetry:
     opensearch_exporter_on_error_flush_failures:
       enabled: true
       stability: alpha
-      description: Number of failures when flushing documents to the on-error index.
-      unit: "{failure}"
-      attributes: [index]
+      description: Number of documents that could not be delivered to the on-error (dead-letter) index. Counted per document at the pipeline stage where the drop occurred (envelope marshal, enqueue, per-item indexing failure, per-item transport failure, or indexer creation failure).
+      unit: "{document}"
+      attributes: [index, failure_stage]
       sum:
         value_type: int
         monotonic: true

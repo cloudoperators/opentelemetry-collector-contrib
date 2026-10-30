@@ -48,17 +48,18 @@ Number of documents routed to the on-error index due to permanent indexing failu
 
 ### otelcol_opensearch_exporter_on_error_flush_failures
 
-Number of failures when flushing documents to the on-error index.
+Number of documents that could not be delivered to the on-error (dead-letter) index. Counted per document at the pipeline stage where the drop occurred (envelope marshal, enqueue, per-item indexing failure, per-item transport failure, or indexer creation failure).
 
 | Unit | Metric Type | Value Type | Monotonic | Stability |
 | ---- | ----------- | ---------- | --------- | --------- |
-| {failure} | Sum | Int | true | Alpha |
+| {document} | Sum | Int | true | Alpha |
 
 #### Attributes
 
 | Name | Description | Values | Semantic Convention |
 | ---- | ----------- | ------ | ------------------- |
 | index | The OpenSearch index name | Any Str | - |
+| failure_stage | The pipeline stage where the on-error delivery failed | Any Str | - |
 
 ### otelcol_opensearch_exporter_permanent_errors
 

@@ -69,8 +69,8 @@ func NewTelemetryBuilder(settings component.TelemetrySettings, options ...Teleme
 	errs = errors.Join(errs, err)
 	builder.OpensearchExporterOnErrorFlushFailures, err = builder.meter.Int64Counter(
 		"otelcol_opensearch_exporter_on_error_flush_failures",
-		metric.WithDescription("Number of failures when flushing documents to the on-error index. [Alpha]"),
-		metric.WithUnit("{failure}"),
+		metric.WithDescription("Number of documents that could not be delivered to the on-error (dead-letter) index. Counted per document at the pipeline stage where the drop occurred (envelope marshal, enqueue, per-item indexing failure, per-item transport failure, or indexer creation failure). [Alpha]"),
+		metric.WithUnit("{document}"),
 	)
 	errs = errors.Join(errs, err)
 	builder.OpensearchExporterPermanentErrors, err = builder.meter.Int64Counter(

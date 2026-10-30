@@ -79,17 +79,20 @@ func TestRecordOnErrorFlushFailure(t *testing.T) {
 	m, reader := newTestMetrics(t)
 	ctx := context.Background()
 
-	m.recordOnErrorFlushFailure(ctx, "test")
-	m.recordOnErrorFlushFailure(ctx, "test")
+	m.recordOnErrorFlushFailure(ctx, "test", "item_indexing")
+	m.recordOnErrorFlushFailure(ctx, "test", "item_indexing")
+	m.recordOnErrorFlushFailure(ctx, "test", "enqueue")
+	m.recordOnErrorFlushFailureN(ctx, "test", "indexer_create", 5)
 
 	sums := collectInt64Sum(t, reader, "otelcol_opensearch_exporter_on_error_flush_failures")
 	total := int64(0)
 	for _, v := range sums {
 		total += v
 	}
-	assert.Equal(t, int64(2), total)
-	_, ok := sums["index=test"]
-	assert.True(t, ok)
+	assert.Equal(t, int64(8), total)
+	assert.Equal(t, int64(2), sums["failure_stage=item_indexing,index=test"])
+	assert.Equal(t, int64(1), sums["failure_stage=enqueue,index=test"])
+	assert.Equal(t, int64(5), sums["failure_stage=indexer_create,index=test"])
 }
 
 func TestRecordPermanentError(t *testing.T) {
