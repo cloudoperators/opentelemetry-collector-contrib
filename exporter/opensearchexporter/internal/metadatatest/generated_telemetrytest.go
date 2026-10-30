@@ -40,8 +40,8 @@ func AssertEqualOpensearchExporterOnErrorDocs(t *testing.T, tt *componenttest.Te
 func AssertEqualOpensearchExporterOnErrorFlushFailures(t *testing.T, tt *componenttest.Telemetry, dps []metricdata.DataPoint[int64], opts ...metricdatatest.Option) {
 	want := metricdata.Metrics{
 		Name:        "otelcol_opensearch_exporter_on_error_flush_failures",
-		Description: "Number of failures when flushing documents to the on-error index. [Alpha]",
-		Unit:        "{failure}",
+		Description: "Number of documents that could not be delivered to the on-error (dead-letter) index. Counted per document at the pipeline stage where the drop occurred (envelope marshal, enqueue, per-item indexing failure, per-item transport failure, or indexer creation failure). [Alpha]",
+		Unit:        "{document}",
 		Data: metricdata.Sum[int64]{
 			Temporality: metricdata.CumulativeTemporality,
 			IsMonotonic: true,

@@ -36,8 +36,24 @@ func (m *exporterMetrics) recordOnErrorDoc(ctx context.Context, errorType, error
 	)
 }
 
-func (m *exporterMetrics) recordOnErrorFlushFailure(ctx context.Context, index string) {
-	m.OpensearchExporterOnErrorFlushFailures.Add(ctx, 1, metric.WithAttributes(attribute.String("index", index)))
+func (m *exporterMetrics) recordOnErrorFlushFailure(ctx context.Context, index, failureStage string) {
+	if m == nil {
+		return
+	}
+	m.OpensearchExporterOnErrorFlushFailures.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("index", index),
+		attribute.String("failure_stage", failureStage),
+	))
+}
+
+func (m *exporterMetrics) recordOnErrorFlushFailureN(ctx context.Context, index, failureStage string, n int) {
+	if m == nil || n <= 0 {
+		return
+	}
+	m.OpensearchExporterOnErrorFlushFailures.Add(ctx, int64(n), metric.WithAttributes(
+		attribute.String("index", index),
+		attribute.String("failure_stage", failureStage),
+	))
 }
 
 func (m *exporterMetrics) recordPermanentError(ctx context.Context, errorType, errorClass string, status int, index string) {

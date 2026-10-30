@@ -149,6 +149,8 @@ func (lbi *logBulkIndexer) onIndexerError(_ context.Context, indexerErr error) {
 }
 
 // onErrorIndexerError keeps the old behavior for the on-error (dead-letter) indexer.
+// No metric is recorded here: per-item OnFailure callbacks fire for every document in
+// a failed bulk request, so counting at this level would double-count.
 func (lbi *logBulkIndexer) onErrorIndexerError(_ context.Context, indexerErr error) {
 	if indexerErr != nil {
 		lbi.logger.Debug("opensearch on-error bulk indexer transport error", zap.Error(indexerErr))
@@ -360,7 +362,7 @@ func trimReasonPreview(reason string) string {
 }
 
 // submitToOnError requires lbi.mu.
-func (lbi *logBulkIndexer) submitToOnError(_ context.Context, resp opensearchapi.BulkRespItem, originalPayload []byte) {
+func (lbi *logBulkIndexer) submitToOnError(ctx context.Context, resp opensearchapi.BulkRespItem, originalPayload []byte) {
 	errType := "unknown"
 	errReason := "unknown"
 	if resp.Error != nil {
@@ -387,6 +389,7 @@ func (lbi *logBulkIndexer) submitToOnError(_ context.Context, resp opensearchapi
 	doc, err := json.Marshal(envelope)
 	if err != nil {
 		lbi.logger.Debug("failed to marshal on-error envelope, dropping", zap.Error(err), zap.String("on_error_index", lbi.onErrorIndex))
+		lbi.metrics.recordOnErrorFlushFailure(ctx, lbi.onErrorIndex, "envelope_marshal")
 		lbi.addPermanentError(err)
 		return
 	}
@@ -408,7 +411,9 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 
 	onErrorIndexer, err := newLogOpenSearchBulkIndexer(client, lbi.onErrorIndexerError, lbi.pipeline, lbi.flushBytes)
 	if err != nil {
-		lbi.logger.Debug("failed to create on-error bulk indexer", zap.Error(err), zap.String("on_error_index", lbi.onErrorIndex))
+		lbi.logger.Debug("failed to create on-error bulk indexer", zap.Error(err), zap.Int("doc_count", len(docs)), zap.String("on_error_index", lbi.onErrorIndex))
+		// Count every doc that will be dropped due to the indexer not being created.
+		lbi.metrics.recordOnErrorFlushFailureN(ctx, lbi.onErrorIndex, "indexer_create", len(docs))
 		return err
 	}
 	for _, doc := range docs {
@@ -418,9 +423,6 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 			Body:   bytes.NewReader(doc),
 		}
 		item.OnFailure = func(_ context.Context, _ opensearchutil.BulkIndexerItem, resp opensearchapi.BulkRespItem, itemErr error) {
-			if lbi.metrics != nil {
-				lbi.metrics.recordOnErrorFlushFailure(ctx, lbi.onErrorIndex)
-			}
 			errType := "unknown"
 			errReason := "unknown"
 			if resp.Error != nil {
@@ -432,19 +434,24 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 				}
 			}
 			if itemErr != nil {
+				lbi.metrics.recordOnErrorFlushFailure(ctx, lbi.onErrorIndex, "item_transport")
 				lbi.logger.Debug("failed to write document to on-error index (transport error), dropping", zap.Error(itemErr), zap.String("on_error_index", lbi.onErrorIndex), zap.ByteString("document", doc))
 				lbi.appendPermanentError(itemErr)
 				return
 			}
+			lbi.metrics.recordOnErrorFlushFailure(ctx, lbi.onErrorIndex, "item_indexing")
 			lbi.logger.Debug("failed to write document to on-error index (indexing error), dropping", zap.Int("status", resp.Status), zap.String("error_type", errType), zap.String("error_reason", errReason), zap.String("on_error_index", lbi.onErrorIndex), zap.ByteString("document", doc))
 			lbi.appendPermanentError(responseAsError(resp))
 		}
 		if addErr := onErrorIndexer.Add(ctx, item); addErr != nil {
 			lbi.logger.Debug("failed to enqueue document into on-error bulk indexer", zap.Error(addErr), zap.String("on_error_index", lbi.onErrorIndex))
+			lbi.metrics.recordOnErrorFlushFailure(ctx, lbi.onErrorIndex, "enqueue")
 			lbi.appendPermanentError(addErr)
 		}
 	}
 	if closeErr := onErrorIndexer.Close(ctx); closeErr != nil {
+		// No metric recorded here: per-item OnFailure callbacks fire for any pending
+		// documents flushed during Close, so this error is terminal, not per-doc.
 		lbi.logger.Debug("on-error bulk indexer close returned error", zap.Error(closeErr), zap.String("on_error_index", lbi.onErrorIndex))
 		return closeErr
 	}
