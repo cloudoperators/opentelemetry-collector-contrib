@@ -334,3 +334,93 @@ func TestFlushOnErrorIndexCloseDrainsAfterAddTimeout(t *testing.T) {
 	}
 	assert.Equal(t, int64(docCount), total, "Close drain must finalize every doc even when Add ctx expired, got %v", failures)
 }
+
+// Regression for transport-level bounding of dead-letter writes: when the server never
+// responds (handler blocks forever) and the dead-letter opensearchapi.Client is wrapped
+// with a per-request timeout transport, flushOnErrorIndex must still return promptly
+// instead of blocking indefinitely on opensearchutil's wg.Wait(). This guards the
+// advertised shutdown bound against a hung endpoint.
+func TestFlushOnErrorIndexReturnsWhenEndpointBlocksForever(t *testing.T) {
+	const docCount = 4
+	const requestTimeout = 150 * time.Millisecond
+
+	never := make(chan struct{})
+	t.Cleanup(func() { close(never) }) // release server at test teardown so httptest.Server.Close doesn't hang
+
+	var deadletterSeen atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		isDeadletter := strings.Contains(r.URL.Path, "_bulk") && readContains(t, r, "deadletter")
+		if isDeadletter {
+			deadletterSeen.Add(1)
+			// Block until the request context is cancelled (transport-level timeout)
+			// or the test cleanup runs — whichever happens first.
+			select {
+			case <-r.Context().Done():
+			case <-never:
+			}
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(bulkItems(t, r, func(_ int, index string) map[string]any {
+			return map[string]any{"_index": index, "status": 400, "error": map[string]any{"type": "mapper_parsing_exception", "reason": "bad field"}}
+		}))
+	}))
+	defer srv.Close()
+
+	// Build the dead-letter client with the per-request timeout transport, mirroring
+	// what logExporter.Start does in production when OnErrorFlush.Timeout > 0.
+	baseClient := srv.Client()
+	onErrorHTTPClient := &http.Client{
+		Transport: &perRequestTimeoutTransport{base: baseClient.Transport, timeout: requestTimeout},
+	}
+	onErrorClient, err := newOpenSearchClient(srv.URL, onErrorHTTPClient, zap.NewNop())
+	require.NoError(t, err)
+
+	m, reader := newTestMetrics(t)
+	cfg := &Config{LogsIndex: "syslog", BulkAction: "create"}
+	// Use the base client (non-wrapped) for primary writes so the primary batch can
+	// finish normally and route docs to dead-letter.
+	primaryClient, err := newOpenSearchClient(srv.URL, baseClient, zap.NewNop())
+	require.NoError(t, err)
+
+	lbi := newLogBulkIndexer("create", &encodeModel{}, "", &ErrorClassConfig{}, "syslog-deadletter", m, zap.NewNop(), 0)
+	require.NoError(t, lbi.start(primaryClient))
+
+	ctx := t.Context()
+	lbi.submit(ctx, testLogs(docCount), newIndexResolver("ss4o_logs", "", ""), cfg, time.Now())
+	lbi.close(ctx)
+
+	// Flush must return within a bounded window even though the server never responds.
+	// Budget: requestTimeout for the request + onErrorCloseDrainGrace for drain + a
+	// generous safety margin for scheduling.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if ferr := lbi.flushOnErrorIndex(ctx, onErrorClient, requestTimeout); ferr != nil {
+			lbi.appendPermanentError(ferr)
+		}
+	}()
+
+	maxWait := requestTimeout + onErrorCloseDrainGrace + 2*time.Second
+	select {
+	case <-done:
+	case <-time.After(maxWait):
+		t.Fatalf("flushOnErrorIndex did not return within %v despite transport-level timeout", maxWait)
+	}
+
+	assert.Positive(t, deadletterSeen.Load(), "server must have received at least one dead-letter request")
+
+	// Workers must have observed the transport-level cancellation and fired OnFailure
+	// callbacks: without the per-request timeout wrap, opensearchutil workers would
+	// still be blocked and no item_transport failures would be recorded even though
+	// Close returned. Proving the metric fired confirms the transport bound unblocks
+	// workers (not just Close's closeCtx abandoning them).
+	failures := collectInt64Sum(t, reader, "otelcol_opensearch_exporter_on_error_flush_failures")
+	var itemTransport int64
+	for reason, v := range failures {
+		if strings.Contains(reason, "item_transport") {
+			itemTransport += v
+		}
+	}
+	assert.Positive(t, itemTransport, "transport-level timeout must unblock workers so item_transport failures are recorded, got %v", failures)
+}

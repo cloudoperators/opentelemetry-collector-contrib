@@ -22,14 +22,13 @@ import (
 )
 
 const (
-	// onErrorCloseDrainBudget caps how long Close is allowed to drain in-flight workers
-	// after the Add loop has finished (successfully or by timeout). Kept independent of
-	// the Add budget so a slow HTTP flush during Add cannot starve Close of its drain
-	// window; without a dedicated budget Close could inherit an already-expired ctx and
-	// return without calling wg.Wait(), leaving accepted documents without final
-	// accounting. The timer starts after the Add loop, so this is the full budget
-	// available to drain pending workers.
-	onErrorCloseDrainBudget = 30 * time.Second
+	// onErrorCloseDrainGrace is the extra budget Close gets on top of the configured
+	// OnErrorFlush.Timeout to let an in-flight HTTP request finish after Add has stopped
+	// accepting new work. The configured timeout drives the HTTP request deadline (via
+	// the dead-letter client's transport), so this grace exists only to let workers
+	// observe that cancellation and fire per-item OnFailure callbacks before Close
+	// returns.
+	onErrorCloseDrainGrace = 2 * time.Second
 )
 
 type logBulkIndexer struct {
@@ -480,7 +479,7 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 	closeCtx := ctx
 	if timeout > 0 {
 		var cancelClose context.CancelFunc
-		closeCtx, cancelClose = context.WithTimeout(context.WithoutCancel(ctx), onErrorCloseDrainBudget)
+		closeCtx, cancelClose = context.WithTimeout(context.WithoutCancel(ctx), timeout+onErrorCloseDrainGrace)
 		defer cancelClose()
 	}
 	if closeErr := onErrorIndexer.Close(closeCtx); closeErr != nil {
