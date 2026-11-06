@@ -1,10 +1,10 @@
 change_type: enhancement
 
-component: exporter/opensearchexporter
+component: exporter/opensearch
 
 note: Give the dead-letter (on-error) index its own timeout so a slow primary write cannot starve it
 
-issues: []
+issues: [0]
 
 subtext: |
   The exporter's single request `timeout` previously covered both the primary index

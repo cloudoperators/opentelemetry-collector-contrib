@@ -23,7 +23,7 @@ func newTestMetrics(t *testing.T) (*exporterMetrics, *sdkmetric.ManualReader) {
 	t.Helper()
 	reader := sdkmetric.NewManualReader()
 	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) }) //nolint:usetesting // test context is cancelled before cleanup runs
 	settings := component.TelemetrySettings{
 		MeterProvider: provider,
 	}
@@ -35,7 +35,7 @@ func newTestMetrics(t *testing.T) (*exporterMetrics, *sdkmetric.ManualReader) {
 func collectInt64Sum(t *testing.T, reader *sdkmetric.ManualReader, metricName string) map[string]int64 {
 	t.Helper()
 	var rm metricdata.ResourceMetrics
-	require.NoError(t, reader.Collect(context.Background(), &rm))
+	require.NoError(t, reader.Collect(t.Context(), &rm))
 	out := map[string]int64{}
 	for _, sm := range rm.ScopeMetrics {
 		for _, m := range sm.Metrics {
@@ -52,7 +52,7 @@ func collectInt64Sum(t *testing.T, reader *sdkmetric.ManualReader, metricName st
 					if key != "" {
 						key += ","
 					}
-					key += string(attr.Key) + "=" + attr.Value.Emit()
+					key += string(attr.Key) + "=" + attr.Value.String()
 				}
 				out[key] += dp.Value
 			}
@@ -63,7 +63,7 @@ func collectInt64Sum(t *testing.T, reader *sdkmetric.ManualReader, metricName st
 
 func TestRecordOnErrorDoc(t *testing.T) {
 	m, reader := newTestMetrics(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	m.recordOnErrorDoc(ctx, "mapper_parsing_exception", "permanent", 400, "test")
 	m.recordOnErrorDoc(ctx, "mapper_parsing_exception", "permanent", 400, "test")
@@ -77,7 +77,7 @@ func TestRecordOnErrorDoc(t *testing.T) {
 
 func TestRecordOnErrorFlushFailure(t *testing.T) {
 	m, reader := newTestMetrics(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	m.recordOnErrorFlushFailure(ctx, "test", "item_indexing")
 	m.recordOnErrorFlushFailure(ctx, "test", "item_indexing")
@@ -97,7 +97,7 @@ func TestRecordOnErrorFlushFailure(t *testing.T) {
 
 func TestRecordPermanentError(t *testing.T) {
 	m, reader := newTestMetrics(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	m.recordPermanentError(ctx, "version_conflict_engine_exception", "permanent", 409, "test")
 
@@ -107,7 +107,7 @@ func TestRecordPermanentError(t *testing.T) {
 
 func TestRecordTransientError(t *testing.T) {
 	m, reader := newTestMetrics(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	m.recordTransientError(ctx, "es_rejected_execution_exception", "test")
 	m.recordTransientError(ctx, "es_rejected_execution_exception", "test")
@@ -118,7 +118,7 @@ func TestRecordTransientError(t *testing.T) {
 
 func TestLogBulkIndexerRecordsMetricsOnItemFailure(t *testing.T) {
 	m, reader := newTestMetrics(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tests := []struct {
 		name          string

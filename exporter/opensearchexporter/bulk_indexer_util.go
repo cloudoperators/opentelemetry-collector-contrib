@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"slices"
 	"syscall"
 
 	"github.com/opensearch-project/opensearch-go/v4"
@@ -17,15 +18,11 @@ import (
 func classifyError(status int, errorType string, cfg *ErrorClassConfig) string {
 	// Check user-supplied overrides first
 	if cfg != nil {
-		for _, t := range cfg.Permanent {
-			if t == errorType {
-				return "permanent"
-			}
+		if slices.Contains(cfg.Permanent, errorType) {
+			return "permanent"
 		}
-		for _, t := range cfg.Transient {
-			if t == errorType {
-				return "transient"
-			}
+		if slices.Contains(cfg.Transient, errorType) {
+			return "transient"
 		}
 	}
 
@@ -39,10 +36,8 @@ func classifyError(status int, errorType string, cfg *ErrorClassConfig) string {
 		"version_conflict_engine_exception",
 		"resource_already_exists_exception",
 	}
-	for _, t := range permanentTypes {
-		if t == errorType {
-			return "permanent"
-		}
+	if slices.Contains(permanentTypes, errorType) {
+		return "permanent"
 	}
 
 	// Built-in default set of transient exceptions (user overrides above take precedence).
@@ -53,10 +48,8 @@ func classifyError(status int, errorType string, cfg *ErrorClassConfig) string {
 		"timeout_exception",
 		"circuit_breaking_exception",
 	}
-	for _, t := range transientTypes {
-		if t == errorType {
-			return "transient"
-		}
+	if slices.Contains(transientTypes, errorType) {
+		return "transient"
 	}
 
 	// Fallback to status code

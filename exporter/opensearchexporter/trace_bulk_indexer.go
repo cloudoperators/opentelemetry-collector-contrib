@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/opensearch-project/opensearch-go/v4/opensearchapi"
@@ -162,12 +163,7 @@ func attributesToMapString(attributes pcommon.Map) map[string]string {
 // FIXME: this is used by both trace and log bulk, so it would make sense to keep it in an agnostic file.
 func shouldRetryEvent(status int) bool {
 	retryOnStatus := []int{500, 502, 503, 504, 429}
-	for _, s := range retryOnStatus {
-		if s == status {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(retryOnStatus, status)
 }
 
 func (tbi *traceBulkIndexer) newBulkIndexerItem(document []byte, indexName string) opensearchutil.BulkIndexerItem {

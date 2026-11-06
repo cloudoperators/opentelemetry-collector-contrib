@@ -7,10 +7,9 @@ import (
 	"context"
 	"strings"
 
+	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/templates"
 	"github.com/opensearch-project/opensearch-go/v4/opensearchapi"
 	"go.uber.org/zap"
-
-	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/templates"
 )
 
 const (
