@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -28,6 +29,12 @@ func TestFlushOnErrorIndexAccountsForEveryDocUnderCtxCancel(t *testing.T) {
 	// Hold the dead-letter request so we can cancel ctx while workers are in flight, then
 	// release and let each doc get its 503 OnFailure callback.
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseServer := func() { releaseOnce.Do(func() { close(release) }) }
+	// Register the release cleanup before anything can fail so srv.Close() never blocks
+	// on a handler that is still waiting on `release`, even if a later require.Eventually
+	// times out before the server ever reached the blocking read.
+	t.Cleanup(releaseServer)
 	var released atomic.Bool
 	var deadletterSeen atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -66,7 +73,7 @@ func TestFlushOnErrorIndexAccountsForEveryDocUnderCtxCancel(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		if ferr := lbi.flushOnErrorIndex(flushCtx, client); ferr != nil {
+		if ferr := lbi.flushOnErrorIndex(flushCtx, client, 5*time.Second); ferr != nil {
 			lbi.appendPermanentError(ferr)
 		}
 	}()
@@ -75,7 +82,7 @@ func TestFlushOnErrorIndexAccountsForEveryDocUnderCtxCancel(t *testing.T) {
 	require.Eventually(t, func() bool { return deadletterSeen.Load() >= 1 }, 2*time.Second, 5*time.Millisecond, "deadletter request did not reach server")
 	cancelFlush()
 	// Let the server respond so workers finish their flush and fire OnFailure callbacks.
-	close(release)
+	releaseServer()
 	// Flush must return — Close uses a detached context so wg.Wait() completes once the
 	// handler responds.
 	select {
@@ -149,7 +156,8 @@ func TestFlushOnErrorIndexMixedSuccessAndFailure(t *testing.T) {
 	ctx := t.Context()
 	lbi.submit(ctx, testLogs(docCount), newIndexResolver("ss4o_logs", "", ""), cfg, time.Now())
 	lbi.close(ctx)
-	if ferr := lbi.flushOnErrorIndex(ctx, client); ferr != nil {
+	// timeout=0 exercises the legacy single-ctx path end-to-end.
+	if ferr := lbi.flushOnErrorIndex(ctx, client, 0); ferr != nil {
 		lbi.appendPermanentError(ferr)
 	}
 
@@ -216,7 +224,7 @@ func TestFlushOnErrorIndexEnqueuesEveryDocWhenParentCtxAlreadyCancelled(t *testi
 	// every enqueue would fail and the server would see zero dead-letter requests.
 	primaryCancel()
 
-	if ferr := lbi.flushOnErrorIndex(primaryCtx, client); ferr != nil {
+	if ferr := lbi.flushOnErrorIndex(primaryCtx, client, 5*time.Second); ferr != nil {
 		lbi.appendPermanentError(ferr)
 	}
 
@@ -232,4 +240,82 @@ func TestFlushOnErrorIndexEnqueuesEveryDocWhenParentCtxAlreadyCancelled(t *testi
 		total += v
 	}
 	assert.Equal(t, int64(docCount), total, "every doc must land on a real item fate, got failures=%v", failures)
+}
+
+// Regression for the Close-drain-budget fix: when the dead-letter flush uses a tiny Add
+// timeout and the server stalls past that deadline, Add exhausts its budget but Close
+// must still drain the in-flight worker (because Close runs on its own context with
+// onErrorCloseDrainBudget) so every doc gets a recorded fate. Without the split, Close
+// would inherit the already-expired Add context and return without calling wg.Wait(),
+// leaving the stalled worker's doc unaccounted for.
+func TestFlushOnErrorIndexCloseDrainsAfterAddTimeout(t *testing.T) {
+	const docCount = 4
+
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseServer := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseServer)
+
+	var deadletterSeen atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		isDeadletter := strings.Contains(r.URL.Path, "_bulk") && readContains(t, r, "deadletter")
+		if isDeadletter {
+			deadletterSeen.Add(1)
+			<-release
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(bulkItems(t, r, func(_ int, index string) map[string]any {
+			if !strings.HasSuffix(index, "deadletter") {
+				return map[string]any{"_index": index, "status": 400, "error": map[string]any{"type": "mapper_parsing_exception", "reason": "bad field"}}
+			}
+			return map[string]any{"_index": index, "status": 503, "error": map[string]any{"type": "es_rejected_execution_exception", "reason": "queue full"}}
+		}))
+	}))
+	defer srv.Close()
+
+	m, reader := newTestMetrics(t)
+	client, err := newOpenSearchClient(srv.URL, srv.Client(), zap.NewNop())
+	require.NoError(t, err)
+	cfg := &Config{LogsIndex: "syslog", BulkAction: "create"}
+	lbi := newLogBulkIndexer("create", &encodeModel{}, "", &ErrorClassConfig{}, "syslog-deadletter", m, zap.NewNop(), 0)
+	require.NoError(t, lbi.start(client))
+
+	parent, cancelParent := context.WithCancel(t.Context())
+	defer cancelParent()
+	lbi.submit(parent, testLogs(docCount), newIndexResolver("ss4o_logs", "", ""), cfg, time.Now())
+	lbi.close(parent)
+
+	// Short Add timeout so the Add ctx expires while the server is still blocked. Close
+	// runs with its own independent budget (onErrorCloseDrainBudget) and must drain the
+	// stalled worker once the server releases.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if ferr := lbi.flushOnErrorIndex(parent, client, 100*time.Millisecond); ferr != nil {
+			lbi.appendPermanentError(ferr)
+		}
+	}()
+
+	// Wait until the first dead-letter request has reached the server, confirm Add's
+	// budget has expired (give it comfortably more than the 100ms timeout), then release.
+	require.Eventually(t, func() bool { return deadletterSeen.Load() >= 1 }, 2*time.Second, 5*time.Millisecond, "deadletter request did not reach server")
+	time.Sleep(200 * time.Millisecond)
+	releaseServer()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("flushOnErrorIndex did not return after Close drain budget")
+	}
+
+	failures := collectInt64Sum(t, reader, "otelcol_opensearch_exporter_on_error_flush_failures")
+	var total int64
+	for _, v := range failures {
+		total += v
+	}
+	// Invariant: every submitted doc reports a final fate. Breakdown between
+	// "enqueue" (Adds short-circuited after Add ctx expired) and "item_indexing" (the
+	// in-flight worker finished after release, via Close's independent budget) depends
+	// on scheduling; the total must match submitted.
+	assert.Equal(t, int64(docCount), total, "Close drain must finalize every doc even when Add ctx expired, got %v", failures)
 }
