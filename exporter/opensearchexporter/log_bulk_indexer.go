@@ -21,6 +21,20 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	// onErrorFlushGrace extends the parent's remaining deadline so in-flight HTTP round-trips
+	// can finish and every per-item OnFailure callback fires, preserving the metric invariant
+	// total_submitted = success + failure.
+	onErrorFlushGrace = 2 * time.Second
+
+	// onErrorFlushFallback bounds the detached workerCtx when the parent has no deadline.
+	// Intentionally independent of Config.defaultOnErrorFlushTimeout: that one is the
+	// factory default operators see; this one is the last-resort cap inside the bulk
+	// indexer when the caller supplied a deadline-less ctx (unit tests, background
+	// callers). Matching values today is coincidence — do not DRY them.
+	onErrorFlushFallback = 30 * time.Second
+)
+
 type logBulkIndexer struct {
 	bulkAction          string
 	pipeline            string
@@ -416,6 +430,19 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 		lbi.metrics.recordOnErrorFlushFailureN(ctx, lbi.onErrorIndex, "indexer_create", len(docs))
 		return err
 	}
+	// workerCtx drives Add and Close on a context detached from ctx so upstream
+	// cancellation cannot bypass per-item OnFailure callbacks (opensearchutil Close
+	// returns without wg.Wait() when ctx is done). A bounded deadline keeps shutdown
+	// finite. Metric labels and logs keep the original ctx for trace correlation.
+	workerCtx := context.WithoutCancel(ctx)
+	var cancel context.CancelFunc
+	if deadline, ok := ctx.Deadline(); ok {
+		workerCtx, cancel = context.WithDeadline(workerCtx, deadline.Add(onErrorFlushGrace))
+	} else {
+		workerCtx, cancel = context.WithTimeout(workerCtx, onErrorFlushFallback)
+	}
+	defer cancel()
+
 	for _, doc := range docs {
 		item := opensearchutil.BulkIndexerItem{
 			Action: lbi.bulkAction,
@@ -443,13 +470,13 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 			lbi.logger.Debug("failed to write document to on-error index (indexing error), dropping", zap.Int("status", resp.Status), zap.String("error_type", errType), zap.String("error_reason", errReason), zap.String("on_error_index", lbi.onErrorIndex), zap.ByteString("document", doc))
 			lbi.appendPermanentError(responseAsError(resp))
 		}
-		if addErr := onErrorIndexer.Add(ctx, item); addErr != nil {
+		if addErr := onErrorIndexer.Add(workerCtx, item); addErr != nil {
 			lbi.logger.Debug("failed to enqueue document into on-error bulk indexer", zap.Error(addErr), zap.String("on_error_index", lbi.onErrorIndex))
 			lbi.metrics.recordOnErrorFlushFailure(ctx, lbi.onErrorIndex, "enqueue")
 			lbi.appendPermanentError(addErr)
 		}
 	}
-	if closeErr := onErrorIndexer.Close(ctx); closeErr != nil {
+	if closeErr := onErrorIndexer.Close(workerCtx); closeErr != nil {
 		// No metric recorded here: per-item OnFailure callbacks fire for any pending
 		// documents flushed during Close, so this error is terminal, not per-doc.
 		lbi.logger.Debug("on-error bulk indexer close returned error", zap.Error(closeErr), zap.String("on_error_index", lbi.onErrorIndex))
