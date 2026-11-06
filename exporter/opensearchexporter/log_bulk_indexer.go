@@ -22,18 +22,13 @@ import (
 )
 
 const (
-	// onErrorFlushFallback bounds the detached Add ctx when the parent has no deadline.
-	// Intentionally independent of Config.defaultOnErrorFlushTimeout: that one is the
-	// factory default operators see; this one is the last-resort cap inside the bulk
-	// indexer when the caller supplied a deadline-less ctx (unit tests, background
-	// callers). Matching values today is coincidence — do not DRY them.
-	onErrorFlushFallback = 30 * time.Second
-
 	// onErrorCloseDrainBudget caps how long Close is allowed to drain in-flight workers
-	// after Add has finished (successfully or by timeout). Kept independent of the Add
-	// budget so a slow HTTP flush during Add cannot starve Close of its drain window;
-	// without a dedicated budget Close could inherit an already-expired ctx and return
-	// without calling wg.Wait(), leaving accepted documents without final accounting.
+	// after the Add loop has finished (successfully or by timeout). Kept independent of
+	// the Add budget so a slow HTTP flush during Add cannot starve Close of its drain
+	// window; without a dedicated budget Close could inherit an already-expired ctx and
+	// return without calling wg.Wait(), leaving accepted documents without final
+	// accounting. The timer starts after the Add loop, so this is the full budget
+	// available to drain pending workers.
 	onErrorCloseDrainBudget = 30 * time.Second
 )
 
@@ -437,26 +432,15 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 	//  - timeout == 0 (legacy mode): use ctx as-is for Add and Close. Preserves the
 	//    pre-config single-ctx behavior opt-in advertised by OnErrorFlushConfig.Timeout.
 	//  - timeout > 0: Add runs on a context detached from the push ctx's cancellation
-	//    and bounded by timeout (or onErrorFlushFallback when the parent has no deadline).
-	//    Close runs on a separate detached ctx bounded by onErrorCloseDrainBudget so an
-	//    exhausted Add budget cannot starve the drain window. Metric labels and logs keep
-	//    the original ctx for trace correlation.
-	var (
-		addCtx   = ctx
-		closeCtx = ctx
-	)
+	//    and bounded by timeout. Close runs on a separate detached ctx bounded by
+	//    onErrorCloseDrainBudget, created *after* Add returns so Close's drain window is
+	//    not consumed by queue backpressure during Add. Metric labels and logs keep the
+	//    original ctx for trace correlation.
+	addCtx := ctx
 	if timeout > 0 {
 		var cancelAdd context.CancelFunc
-		if _, ok := ctx.Deadline(); ok {
-			addCtx, cancelAdd = context.WithTimeout(context.WithoutCancel(ctx), timeout)
-		} else {
-			addCtx, cancelAdd = context.WithTimeout(context.WithoutCancel(ctx), onErrorFlushFallback)
-		}
+		addCtx, cancelAdd = context.WithTimeout(context.WithoutCancel(ctx), timeout)
 		defer cancelAdd()
-
-		var cancelClose context.CancelFunc
-		closeCtx, cancelClose = context.WithTimeout(context.WithoutCancel(ctx), onErrorCloseDrainBudget)
-		defer cancelClose()
 	}
 
 	for _, doc := range docs {
@@ -491,6 +475,13 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 			lbi.metrics.recordOnErrorFlushFailure(ctx, lbi.onErrorIndex, "enqueue")
 			lbi.appendPermanentError(addErr)
 		}
+	}
+
+	closeCtx := ctx
+	if timeout > 0 {
+		var cancelClose context.CancelFunc
+		closeCtx, cancelClose = context.WithTimeout(context.WithoutCancel(ctx), onErrorCloseDrainBudget)
+		defer cancelClose()
 	}
 	if closeErr := onErrorIndexer.Close(closeCtx); closeErr != nil {
 		// No metric recorded here: per-item OnFailure callbacks fire for any pending

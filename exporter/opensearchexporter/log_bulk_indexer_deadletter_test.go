@@ -242,14 +242,19 @@ func TestFlushOnErrorIndexEnqueuesEveryDocWhenParentCtxAlreadyCancelled(t *testi
 	assert.Equal(t, int64(docCount), total, "every doc must land on a real item fate, got failures=%v", failures)
 }
 
-// Regression for the Close-drain-budget fix: when the dead-letter flush uses a tiny Add
-// timeout and the server stalls past that deadline, Add exhausts its budget but Close
-// must still drain the in-flight worker (because Close runs on its own context with
-// onErrorCloseDrainBudget) so every doc gets a recorded fate. Without the split, Close
-// would inherit the already-expired Add context and return without calling wg.Wait(),
-// leaving the stalled worker's doc unaccounted for.
+// Regression for the Close-drain-budget fix. Forces Add backpressure (large doc count
+// and small flush_bytes so each Add triggers an HTTP flush the server blocks) with a
+// short Add timeout, so Add exhausts its budget *before* Close begins. Close then runs
+// with its own onErrorCloseDrainBudget and must drain the in-flight worker that is
+// still waiting on the blocked server. Without the split (Add and Close sharing one
+// expired ctx), Close would return before wg.Wait() completes and the in-flight doc
+// would be dropped without a final fate.
+//
+// Signal that Add timed out by observing the "enqueue" failure reason: Add only buckets
+// docs there when its ctx expires mid-loop. Then release the server and assert every
+// submitted doc landed on a final fate.
 func TestFlushOnErrorIndexCloseDrainsAfterAddTimeout(t *testing.T) {
-	const docCount = 4
+	const docCount = 32
 
 	release := make(chan struct{})
 	var releaseOnce sync.Once
@@ -277,7 +282,11 @@ func TestFlushOnErrorIndexCloseDrainsAfterAddTimeout(t *testing.T) {
 	client, err := newOpenSearchClient(srv.URL, srv.Client(), zap.NewNop())
 	require.NoError(t, err)
 	cfg := &Config{LogsIndex: "syslog", BulkAction: "create"}
-	lbi := newLogBulkIndexer("create", &encodeModel{}, "", &ErrorClassConfig{}, "syslog-deadletter", m, zap.NewNop(), 0)
+	// flush_bytes=1 forces the bulk indexer to flush after every single enqueued doc,
+	// so Add is immediately queued behind the blocked HTTP request. Combined with many
+	// docs and a short Add timeout, this reliably produces "enqueue" failures during
+	// Add before Close starts.
+	lbi := newLogBulkIndexer("create", &encodeModel{}, "", &ErrorClassConfig{}, "syslog-deadletter", m, zap.NewNop(), 1)
 	require.NoError(t, lbi.start(client))
 
 	parent, cancelParent := context.WithCancel(t.Context())
@@ -285,9 +294,6 @@ func TestFlushOnErrorIndexCloseDrainsAfterAddTimeout(t *testing.T) {
 	lbi.submit(parent, testLogs(docCount), newIndexResolver("ss4o_logs", "", ""), cfg, time.Now())
 	lbi.close(parent)
 
-	// Short Add timeout so the Add ctx expires while the server is still blocked. Close
-	// runs with its own independent budget (onErrorCloseDrainBudget) and must drain the
-	// stalled worker once the server releases.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -296,10 +302,23 @@ func TestFlushOnErrorIndexCloseDrainsAfterAddTimeout(t *testing.T) {
 		}
 	}()
 
-	// Wait until the first dead-letter request has reached the server, confirm Add's
-	// budget has expired (give it comfortably more than the 100ms timeout), then release.
+	// Confirm the server actually received at least one dead-letter request (otherwise
+	// Add never applied backpressure and the test does not exercise the regression).
 	require.Eventually(t, func() bool { return deadletterSeen.Load() >= 1 }, 2*time.Second, 5*time.Millisecond, "deadletter request did not reach server")
-	time.Sleep(200 * time.Millisecond)
+
+	// Wait for Add to have timed out: the "enqueue" metric is only recorded when Add
+	// returns ctx.DeadlineExceeded mid-loop. Polling this proves Add's budget expired
+	// *before* Close begins its own drain window, which is the regression we are guarding.
+	require.Eventually(t, func() bool {
+		for reason, v := range collectInt64Sum(t, reader, "otelcol_opensearch_exporter_on_error_flush_failures") {
+			if strings.Contains(reason, "enqueue") && v > 0 {
+				return true
+			}
+		}
+		return false
+	}, 2*time.Second, 10*time.Millisecond, "Add did not time out: no enqueue failures recorded")
+
+	// Release the blocked server so the in-flight worker can finish via Close's drain.
 	releaseServer()
 
 	select {
@@ -313,9 +332,5 @@ func TestFlushOnErrorIndexCloseDrainsAfterAddTimeout(t *testing.T) {
 	for _, v := range failures {
 		total += v
 	}
-	// Invariant: every submitted doc reports a final fate. Breakdown between
-	// "enqueue" (Adds short-circuited after Add ctx expired) and "item_indexing" (the
-	// in-flight worker finished after release, via Close's independent budget) depends
-	// on scheduling; the total must match submitted.
 	assert.Equal(t, int64(docCount), total, "Close drain must finalize every doc even when Add ctx expired, got %v", failures)
 }
