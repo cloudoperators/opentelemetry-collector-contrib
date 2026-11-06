@@ -353,9 +353,7 @@ func originalLogChunks(payload []byte) map[string]string {
 	baseKey := "original_log"
 	for i, start := 0, 0; start < len(payload); i, start = i+1, start+luceneMaxFieldBytes {
 		end := start + luceneMaxFieldBytes
-		if end > len(payload) {
-			end = len(payload)
-		}
+		end = min(end, len(payload))
 		key := baseKey
 		if i > 0 {
 			key = baseKey + "_" + strconv.Itoa(i)
@@ -369,8 +367,8 @@ func originalLogChunks(payload []byte) map[string]string {
 // to mapper_parsing_exception reasons, which can contain the full field value.
 func trimReasonPreview(reason string) string {
 	const previewMarker = ". Preview of field's value:"
-	if idx := strings.Index(reason, previewMarker); idx != -1 {
-		return reason[:idx]
+	if before, _, found := strings.Cut(reason, previewMarker); found {
+		return before
 	}
 	return reason
 }

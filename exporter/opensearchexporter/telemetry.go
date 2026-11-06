@@ -6,11 +6,10 @@ package opensearchexporter // import "github.com/cloudoperators/opentelemetry-co
 import (
 	"context"
 
+	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/metadata"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
-
-	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/metadata"
 )
 
 type exporterMetrics struct {
@@ -67,7 +66,7 @@ func (m *exporterMetrics) recordPermanentError(ctx context.Context, errorType, e
 	)
 }
 
-func (m *exporterMetrics) recordTransientError(ctx context.Context, errorType string, index string) {
+func (m *exporterMetrics) recordTransientError(ctx context.Context, errorType, index string) {
 	m.OpensearchExporterTransientErrors.Add(ctx, 1,
 		metric.WithAttributes(
 			attribute.String("error_type", errorType),

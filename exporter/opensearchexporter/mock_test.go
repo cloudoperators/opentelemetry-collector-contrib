@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/metadata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component/componenttest"
@@ -20,7 +21,6 @@ import (
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
 	"go.opentelemetry.io/collector/exporter/exportertest"
 
-	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/metadata"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/golden"
 )
 
@@ -761,7 +761,7 @@ func TestOpenSearchLogExporterIndexOnError(t *testing.T) {
 		var docs []map[string]any
 		for decoder.More() {
 			var line any
-			require.NoError(t, decoder.Decode(&line))
+			assert.NoError(t, decoder.Decode(&line))
 			obj, ok := line.(map[string]any)
 			if !ok {
 				continue
@@ -776,18 +776,18 @@ func TestOpenSearchLogExporterIndexOnError(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		switch requestCount {
 		case 0:
-			require.Len(t, docs, 2)
+			assert.Len(t, docs, 2)
 			response, err := os.ReadFile("testdata/opensearch-response-mapping-error.json")
-			require.NoError(t, err)
+			assert.NoError(t, err)
 			_, err = w.Write(response)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		case 1:
-			require.Len(t, docs, 1)
+			assert.Len(t, docs, 1)
 			onErrorDocs = docs
 			response, err := os.ReadFile("testdata/opensearch-response-on-error-success.json")
-			require.NoError(t, err)
+			assert.NoError(t, err)
 			_, err = w.Write(response)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		default:
 			t.Errorf("unexpected request %d", requestCount)
 		}

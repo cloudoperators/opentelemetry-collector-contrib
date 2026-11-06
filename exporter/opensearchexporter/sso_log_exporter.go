@@ -7,13 +7,12 @@ import (
 	"context"
 	"time"
 
+	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/pool"
 	"github.com/opensearch-project/opensearch-go/v4/opensearchapi"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/pdata/plog"
-
-	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/pool"
 )
 
 type logExporter struct {

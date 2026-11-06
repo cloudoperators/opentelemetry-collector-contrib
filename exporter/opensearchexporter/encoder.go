@@ -10,14 +10,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/objmodel"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/pool"
+	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/serializer"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
-
-	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/objmodel"
-	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/pool"
-	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/opensearchexporter/internal/serializer"
 )
 
 var errInvalidTypeForBodyMapMode = errors.New("invalid log record body type for 'bodymap' mapping mode")

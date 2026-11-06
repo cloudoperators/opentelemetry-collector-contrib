@@ -14,7 +14,7 @@ import (
 
 // Zero timeout returns the parent unchanged (legacy behavior).
 func TestOnErrorFlushContextZeroTimeoutInheritsParent(t *testing.T) {
-	parent, cancel := context.WithDeadline(context.Background(), time.Now().Add(42*time.Millisecond))
+	parent, cancel := context.WithDeadline(t.Context(), time.Now().Add(42*time.Millisecond))
 	defer cancel()
 
 	flushCtx, flushCancel := onErrorFlushContext(parent, 0)
@@ -29,7 +29,7 @@ func TestOnErrorFlushContextZeroTimeoutInheritsParent(t *testing.T) {
 // A positive timeout detaches the flush from an expired parent deadline.
 func TestOnErrorFlushContextDetachesDeadline(t *testing.T) {
 	// Parent is already past its deadline.
-	parent, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	parent, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
 	defer cancel()
 	require.Error(t, parent.Err(), "sanity: parent must be expired")
 
@@ -44,7 +44,7 @@ func TestOnErrorFlushContextDetachesDeadline(t *testing.T) {
 
 // Parent cancellation does not propagate; only the flush timeout ends it.
 func TestOnErrorFlushContextIgnoresParentCancel(t *testing.T) {
-	parent, cancel := context.WithCancel(context.Background())
+	parent, cancel := context.WithCancel(t.Context())
 	flushCtx, flushCancel := onErrorFlushContext(parent, 50*time.Millisecond)
 	defer flushCancel()
 
