@@ -108,7 +108,7 @@ func pushThroughIndexer(ctx context.Context, t *testing.T, srv *httptest.Server,
 	require.NoError(t, lbi.start(client))
 	lbi.submit(ctx, ld, newIndexResolver("ss4o_logs", "", ""), cfg, time.Now())
 	lbi.close(ctx)
-	if ferr := lbi.flushOnErrorIndex(ctx, client); ferr != nil {
+	if ferr := lbi.flushOnErrorIndex(ctx, client, 0); ferr != nil {
 		lbi.appendPermanentError(ferr)
 	}
 	return lbi.joinedError()

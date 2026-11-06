@@ -78,6 +78,9 @@ func TestLoadConfig(t *testing.T) {
 					Mode: "ss4o",
 				},
 				QueueConfig: configoptional.Some(exporterhelper.NewDefaultQueueConfig()),
+				OnErrorFlush: OnErrorFlushConfig{
+					Timeout: defaultOnErrorFlushTimeout,
+				},
 			},
 			configValidateAssert: assert.NoError,
 		},
@@ -367,6 +370,32 @@ func TestOTelV1MappingModeValidation(t *testing.T) {
 				config.ClientConfig.Endpoint = "http://localhost:9200"
 				config.MappingsSettings.Mode = tt.mode
 				config.MappingsSettings.ManageIndexTemplate = tt.manageTpl
+			})
+			err := cfg.Validate()
+			if tt.expectError != "" {
+				assert.ErrorContains(t, err, tt.expectError)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestOnErrorFlushTimeoutValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		timeout     time.Duration
+		expectError string
+	}{
+		{name: "zero is valid", timeout: 0},
+		{name: "positive is valid", timeout: 5 * time.Second},
+		{name: "negative is invalid", timeout: -1 * time.Second, expectError: errOnErrorFlushTimeoutNegative.Error()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := withDefaultConfig(func(c *Config) {
+				c.ClientConfig.Endpoint = "http://localhost:9200"
+				c.OnErrorFlush.Timeout = tt.timeout
 			})
 			err := cfg.Validate()
 			if tt.expectError != "" {

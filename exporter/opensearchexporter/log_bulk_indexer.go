@@ -21,6 +21,16 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	// onErrorCloseDrainGrace is the extra budget Close gets on top of the configured
+	// OnErrorFlush.Timeout to let an in-flight HTTP request finish after Add has stopped
+	// accepting new work. The configured timeout drives the HTTP request deadline (via
+	// the dead-letter client's transport), so this grace exists only to let workers
+	// observe that cancellation and fire per-item OnFailure callbacks before Close
+	// returns.
+	onErrorCloseDrainGrace = 2 * time.Second
+)
+
 type logBulkIndexer struct {
 	bulkAction          string
 	pipeline            string
@@ -396,7 +406,7 @@ func (lbi *logBulkIndexer) submitToOnError(ctx context.Context, resp opensearcha
 	lbi.onErrorDocs = append(lbi.onErrorDocs, doc)
 }
 
-func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opensearchapi.Client) error {
+func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opensearchapi.Client, timeout time.Duration) error {
 	lbi.mu.Lock()
 	docs := lbi.onErrorDocs
 	if lbi.batchRetryErr != nil {
@@ -416,6 +426,22 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 		lbi.metrics.recordOnErrorFlushFailureN(ctx, lbi.onErrorIndex, "indexer_create", len(docs))
 		return err
 	}
+
+	// Context strategy:
+	//  - timeout == 0 (legacy mode): use ctx as-is for Add and Close. Preserves the
+	//    pre-config single-ctx behavior opt-in advertised by OnErrorFlushConfig.Timeout.
+	//  - timeout > 0: Add runs on a context detached from the push ctx's cancellation
+	//    and bounded by timeout. Close runs on a separate detached ctx bounded by
+	//    onErrorCloseDrainBudget, created *after* Add returns so Close's drain window is
+	//    not consumed by queue backpressure during Add. Metric labels and logs keep the
+	//    original ctx for trace correlation.
+	addCtx := ctx
+	if timeout > 0 {
+		var cancelAdd context.CancelFunc
+		addCtx, cancelAdd = context.WithTimeout(context.WithoutCancel(ctx), timeout)
+		defer cancelAdd()
+	}
+
 	for _, doc := range docs {
 		item := opensearchutil.BulkIndexerItem{
 			Action: lbi.bulkAction,
@@ -443,13 +469,20 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 			lbi.logger.Debug("failed to write document to on-error index (indexing error), dropping", zap.Int("status", resp.Status), zap.String("error_type", errType), zap.String("error_reason", errReason), zap.String("on_error_index", lbi.onErrorIndex), zap.ByteString("document", doc))
 			lbi.appendPermanentError(responseAsError(resp))
 		}
-		if addErr := onErrorIndexer.Add(ctx, item); addErr != nil {
+		if addErr := onErrorIndexer.Add(addCtx, item); addErr != nil {
 			lbi.logger.Debug("failed to enqueue document into on-error bulk indexer", zap.Error(addErr), zap.String("on_error_index", lbi.onErrorIndex))
 			lbi.metrics.recordOnErrorFlushFailure(ctx, lbi.onErrorIndex, "enqueue")
 			lbi.appendPermanentError(addErr)
 		}
 	}
-	if closeErr := onErrorIndexer.Close(ctx); closeErr != nil {
+
+	closeCtx := ctx
+	if timeout > 0 {
+		var cancelClose context.CancelFunc
+		closeCtx, cancelClose = context.WithTimeout(context.WithoutCancel(ctx), timeout+onErrorCloseDrainGrace)
+		defer cancelClose()
+	}
+	if closeErr := onErrorIndexer.Close(closeCtx); closeErr != nil {
 		// No metric recorded here: per-item OnFailure callbacks fire for any pending
 		// documents flushed during Close, so this error is terminal, not per-doc.
 		lbi.logger.Debug("on-error bulk indexer close returned error", zap.Error(closeErr), zap.String("on_error_index", lbi.onErrorIndex))
