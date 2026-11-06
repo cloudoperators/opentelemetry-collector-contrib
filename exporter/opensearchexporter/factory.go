@@ -39,6 +39,9 @@ func newDefaultConfig() component.Config {
 		BackOffConfig:    configretry.NewDefaultBackOffConfig(),
 		MappingsSettings: MappingsSettings{Mode: defaultMappingMode},
 		QueueConfig:      configoptional.Some(exporterhelper.NewDefaultQueueConfig()),
+		OnErrorFlush: OnErrorFlushConfig{
+			Timeout: defaultOnErrorFlushTimeout,
+		},
 	}
 }
 

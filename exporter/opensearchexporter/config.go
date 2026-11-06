@@ -6,6 +6,7 @@ package opensearchexporter // import "github.com/cloudoperators/opentelemetry-co
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/config/configoptional"
@@ -25,6 +26,9 @@ const (
 
 	// defaultMappingMode value is used when component.Config.MappingSettings.Mode is not set.
 	defaultMappingMode = "ss4o"
+
+	// defaultOnErrorFlushTimeout bounds the dead-letter flush when the user does not set one.
+	defaultOnErrorFlushTimeout = 30 * time.Second
 )
 
 // Config defines configuration for OpenSearch exporter.
@@ -79,12 +83,30 @@ type Config struct {
 	// User-supplied classs override built-in defaults.
 	ErrorClass ErrorClassConfig `mapstructure:"error_class"`
 
+	// OnErrorFlush bounds the dead-letter (LogsIndexOnError) flush independently of the
+	// primary push timeout. Only takes effect when LogsIndexOnError is set.
+	OnErrorFlush OnErrorFlushConfig `mapstructure:"on_error_flush"`
+
 	// FlushBytes sets the threshold in bytes at which the bulk indexer flushes
 	// buffered documents to OpenSearch in a single _bulk request. Larger values
 	// reduce the number of HTTP round-trips at the cost of higher per-request
 	// memory and latency. When set to 0 (default), the opensearch-go client
 	// library default of 5 MB is used.
 	FlushBytes int `mapstructure:"flush_bytes"`
+}
+
+// OnErrorFlushConfig bounds the dead-letter flush independently of the primary push.
+type OnErrorFlushConfig struct {
+	// Timeout caps the dead-letter flush. Zero uses the push context unchanged.
+	//
+	// A small internal grace is added on top so in-flight HTTP round-trips complete
+	// and every per-item OnFailure callback fires.
+	//
+	// This also bounds collector shutdown: shutdown waits up to Timeout + grace for
+	// the flush to drain. Ensure terminationGracePeriodSeconds (or equivalent) exceeds
+	// Timeout, otherwise the runtime will kill the collector mid-flush and dead-letter
+	// docs may be lost.
+	Timeout time.Duration `mapstructure:"timeout"`
 }
 
 // ErrorClassConfig allows customizing which OpenSearch error types are permanent vs transient.
@@ -111,6 +133,7 @@ var (
 	errMetricsMappingModeUnsupported  = errors.New(`metrics are only supported by mapping.mode "ss4o" and "otel-v1"`)
 	errManageIndexTemplateInvalidMode = errors.New("mapping.manage_index_template is only supported with mapping.mode \"otel-v1\"")
 	errFlushBytesInvalid              = errors.New("flush_bytes must be between 0 and 100000000 (100 MB)")
+	errOnErrorFlushTimeoutNegative    = errors.New("on_error_flush.timeout must be >= 0 (0 keeps pre-existing behavior of sharing the primary push context)")
 )
 
 type MappingsSettings struct {
@@ -268,6 +291,10 @@ func (cfg *Config) Validate() error {
 
 	if cfg.FlushBytes < 0 || cfg.FlushBytes > 100_000_000 {
 		multiErr = append(multiErr, errFlushBytesInvalid)
+	}
+
+	if cfg.OnErrorFlush.Timeout < 0 {
+		multiErr = append(multiErr, errOnErrorFlushTimeoutNegative)
 	}
 
 	return errors.Join(multiErr...)

@@ -105,9 +105,22 @@ func (l *logExporter) pushLogData(ctx context.Context, ld plog.Logs) error {
 	indexer.submit(ctx, ld, l.indexResolver, l.config, logTimestamp)
 	indexer.close(ctx)
 
-	// Flush OnError errors are captured in indexer.errs and returned via joinedError
-	if err := indexer.flushOnErrorIndex(ctx, l.client); err != nil {
+	// Dead-letter flush uses a context detached from the push ctx (context.WithoutCancel)
+	// so a slow primary write cannot starve it. Zero timeout keeps the legacy single-ctx
+	// behavior; shutdown is bounded by whichever ctx is in effect.
+	flushCtx, cancel := onErrorFlushContext(ctx, l.config.OnErrorFlush.Timeout)
+	defer cancel()
+	if err := indexer.flushOnErrorIndex(flushCtx, l.client); err != nil {
 		indexer.appendPermanentError(err)
 	}
 	return indexer.joinedError()
+}
+
+// onErrorFlushContext detaches the dead-letter flush from the parent's deadline and
+// applies its own timeout. A zero timeout returns the parent unchanged.
+func onErrorFlushContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return parent, func() {}
+	}
+	return context.WithTimeout(context.WithoutCancel(parent), timeout)
 }
