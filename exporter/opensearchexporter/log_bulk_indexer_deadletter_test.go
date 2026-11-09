@@ -345,7 +345,6 @@ func TestFlushOnErrorIndexReturnsWhenEndpointBlocksForever(t *testing.T) {
 	const requestTimeout = 150 * time.Millisecond
 
 	never := make(chan struct{})
-	t.Cleanup(func() { close(never) }) // release server at test teardown so httptest.Server.Close doesn't hang
 
 	var deadletterSeen atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -353,7 +352,7 @@ func TestFlushOnErrorIndexReturnsWhenEndpointBlocksForever(t *testing.T) {
 		if isDeadletter {
 			deadletterSeen.Add(1)
 			// Block until the request context is cancelled (transport-level timeout)
-			// or the test cleanup runs — whichever happens first.
+			// or the deferred teardown runs — whichever happens first.
 			select {
 			case <-r.Context().Done():
 			case <-never:
@@ -365,7 +364,10 @@ func TestFlushOnErrorIndexReturnsWhenEndpointBlocksForever(t *testing.T) {
 			return map[string]any{"_index": index, "status": 400, "error": map[string]any{"type": "mapper_parsing_exception", "reason": "bad field"}}
 		}))
 	}))
-	defer srv.Close()
+	defer func() {
+		close(never)
+		srv.Close()
+	}()
 
 	// Build the dead-letter client with the per-request timeout transport, mirroring
 	// what logExporter.Start does in production when OnErrorFlush.Timeout > 0.
