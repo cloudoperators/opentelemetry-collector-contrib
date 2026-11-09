@@ -1,0 +1,14 @@
+change_type: enhancement
+
+component: exporter/opensearchexporter
+
+note: Give the dead-letter (on-error) index its own timeout so a slow primary write cannot starve it
+
+issues: []
+
+subtext: |
+  New `on_error_flush.timeout` bounds the dead-letter flush with its own context,
+  so a slow primary write can no longer inherit a near-expired deadline and drop
+  dead-letter docs. Default 30s; set to `0` to keep the previous behavior.
+
+change_logs: [user]
