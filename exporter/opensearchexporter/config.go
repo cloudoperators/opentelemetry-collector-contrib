@@ -97,11 +97,11 @@ type Config struct {
 
 // OnErrorFlushConfig bounds the dead-letter flush independently of the primary push.
 type OnErrorFlushConfig struct {
-	// Timeout caps every phase of the dead-letter flush (HTTP request, Add, Close).
-	// Zero preserves the legacy single-ctx behavior.
+	// Timeout bounds each HTTP request and the Add phase. Close may wait for
+	// Timeout plus a 2s drain grace. Zero preserves legacy single-ctx behavior.
 	//
-	// Also bounds shutdown: ensure terminationGracePeriodSeconds exceeds Timeout
-	// or dead-letter docs may be lost.
+	// With positive Timeout, shutdown may spend 2*Timeout+2s on this flush alone;
+	// terminationGracePeriodSeconds must also allow for other shutdown work.
 	Timeout time.Duration `mapstructure:"timeout"`
 }
 

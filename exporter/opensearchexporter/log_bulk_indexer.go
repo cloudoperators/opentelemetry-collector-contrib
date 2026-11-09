@@ -494,7 +494,6 @@ func (lbi *logBulkIndexer) flushOnErrorIndex(ctx context.Context, client *opense
 		// the overall budget is exhausted.
 		if lbi.onErrorDrainDeadlineSetter != nil {
 			lbi.onErrorDrainDeadlineSetter(drainDeadline)
-			defer lbi.onErrorDrainDeadlineSetter(time.Time{})
 		}
 	}
 	closeErr := onErrorIndexer.Close(closeCtx)

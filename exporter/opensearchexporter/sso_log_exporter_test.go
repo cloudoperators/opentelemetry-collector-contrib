@@ -109,6 +109,7 @@ func TestFlushOnErrorIndexPositiveTimeoutDetachesFromExpiredParent(t *testing.T)
 		lbi.appendPermanentError(ferr)
 	}
 
+	srv.Close()
 	assert.Positive(t, deadletterSeen, "positive timeout must detach Add from expired parent: server must see dead-letter requests")
 	failures := collectInt64Sum(t, reader, "otelcol_opensearch_exporter_on_error_flush_failures")
 	var total int64
