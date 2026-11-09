@@ -7,6 +7,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/opensearch-project/opensearch-go/v4/opensearchapi"
@@ -19,16 +20,16 @@ import (
 )
 
 type logExporter struct {
-	client        *opensearchapi.Client
-	onErrorClient *opensearchapi.Client
-	Index         string
-	bulkAction    string
-	model         mappingModel
-	httpSettings  confighttp.ClientConfig
-	telemetry     component.TelemetrySettings
-	config        *Config
-	indexResolver *indexResolver
-	metrics       *exporterMetrics
+	client               *opensearchapi.Client
+	onErrorBaseTransport http.RoundTripper
+	Index                string
+	bulkAction           string
+	model                mappingModel
+	httpSettings         confighttp.ClientConfig
+	telemetry            component.TelemetrySettings
+	config               *Config
+	indexResolver        *indexResolver
+	metrics              *exporterMetrics
 }
 
 func newLogExporter(cfg *Config, set exporter.Settings) (*logExporter, error) {
@@ -88,24 +89,11 @@ func (l *logExporter) Start(ctx context.Context, host component.Host) error {
 
 	l.client = client
 
-	// Dead-letter writes use a dedicated client whose transport caps every HTTP
-	// round-trip at OnErrorFlush.Timeout. This guarantees flush and shutdown bounds
-	// even if opensearchutil's worker pool ignores the ctx passed to Close, since the
-	// transport layer will unblock stuck requests on its own.
+	// Dead-letter writes get a per-flush transport+client wrapping the shared base
+	// RoundTripper. Building the wrapper per flush keeps each concurrent flush's drain
+	// deadline isolated from overlapping flushes.
 	if l.config.OnErrorFlush.Timeout > 0 {
-		onErrorHTTPClient := &http.Client{
-			Transport: &perRequestTimeoutTransport{
-				base:    httpClient.Transport,
-				timeout: l.config.OnErrorFlush.Timeout,
-			},
-		}
-		onErrorClient, oerr := newOpenSearchClient(l.httpSettings.Endpoint, onErrorHTTPClient, l.telemetry.Logger)
-		if oerr != nil {
-			return oerr
-		}
-		l.onErrorClient = onErrorClient
-	} else {
-		l.onErrorClient = client
+		l.onErrorBaseTransport = httpClient.Transport
 	}
 
 	if l.config.MappingsSettings.ManageIndexTemplate {
@@ -118,6 +106,21 @@ func (l *logExporter) Start(ctx context.Context, host component.Host) error {
 
 func (l *logExporter) pushLogData(ctx context.Context, ld plog.Logs) error {
 	indexer := newLogBulkIndexer(l.bulkAction, l.model, l.config.Pipeline, &l.config.ErrorClass, l.config.LogsIndexOnError, l.metrics, l.telemetry.Logger, l.config.FlushBytes)
+
+	onErrorClient := l.client
+	if l.onErrorBaseTransport != nil {
+		transport := &perRequestTimeoutTransport{
+			base:    l.onErrorBaseTransport,
+			timeout: l.config.OnErrorFlush.Timeout,
+		}
+		c, err := newOpenSearchClient(l.httpSettings.Endpoint, &http.Client{Transport: transport}, l.telemetry.Logger)
+		if err != nil {
+			return err
+		}
+		onErrorClient = c
+		indexer.onErrorDrainDeadlineSetter = transport.setSharedDeadline
+	}
+
 	startErr := indexer.start(l.client)
 	if startErr != nil {
 		return startErr
@@ -128,32 +131,52 @@ func (l *logExporter) pushLogData(ctx context.Context, ld plog.Logs) error {
 	indexer.submit(ctx, ld, l.indexResolver, l.config, logTimestamp)
 	indexer.close(ctx)
 
-	// Dead-letter flush context handling is owned by flushOnErrorIndex itself based on
-	// OnErrorFlush.Timeout: zero preserves the legacy single-ctx behavior; positive
-	// detaches the flush from the push ctx's cancellation with separate Add/Close budgets.
-	// l.onErrorClient's transport enforces a per-request timeout at the HTTP layer so
-	// opensearchutil workers cannot block Close indefinitely on a stuck request.
-	if err := indexer.flushOnErrorIndex(ctx, l.onErrorClient, l.config.OnErrorFlush.Timeout); err != nil {
+	// Timeout=0 preserves legacy single-ctx behavior; timeout>0 is handled inside
+	// flushOnErrorIndex via a detached ctx and the transport's per-request bound.
+	if err := indexer.flushOnErrorIndex(ctx, onErrorClient, l.config.OnErrorFlush.Timeout); err != nil {
 		indexer.appendPermanentError(err)
 	}
 	return indexer.joinedError()
 }
 
-// perRequestTimeoutTransport wraps a base RoundTripper and enforces a hard timeout on
-// every outbound request by attaching a context with the configured deadline. Used by
-// the dead-letter path so opensearchutil's worker pool — which does not propagate our
-// higher-level flush contexts into its HTTP calls — cannot block indefinitely on a
-// stuck server, guaranteeing the advertised flush and shutdown bounds hold.
+// perRequestTimeoutTransport bounds every outbound request two ways:
+//   - per-request timeout caps a single round-trip,
+//   - optional shared deadline set before a drain makes queued requests fail fast
+//     once the overall budget is spent (prevents N serial requests under flush_bytes=1
+//     from blowing the shutdown bound).
 type perRequestTimeoutTransport struct {
 	base    http.RoundTripper
 	timeout time.Duration
+
+	mu             sync.RWMutex
+	sharedDeadline time.Time // zero means no shared deadline
+}
+
+// setSharedDeadline installs an absolute deadline every subsequent RoundTrip must
+// honor alongside its per-request timeout. Zero clears it.
+func (t *perRequestTimeoutTransport) setSharedDeadline(d time.Time) {
+	t.mu.Lock()
+	t.sharedDeadline = d
+	t.mu.Unlock()
 }
 
 func (t *perRequestTimeoutTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	ctx, cancel := context.WithTimeout(req.Context(), t.timeout)
-	// cancel is intentionally not deferred: the response body may still be read after
-	// RoundTrip returns, so we rely on the net/http machinery to call cancel when the
-	// body is closed. Standard pattern for context-wrapping RoundTrippers.
+	t.mu.RLock()
+	shared := t.sharedDeadline
+	t.mu.RUnlock()
+
+	// Fail fast once the shared drain deadline has passed.
+	if !shared.IsZero() && !time.Now().Before(shared) {
+		return nil, context.DeadlineExceeded
+	}
+
+	effective := time.Now().Add(t.timeout)
+	if !shared.IsZero() && shared.Before(effective) {
+		effective = shared
+	}
+	ctx, cancel := context.WithDeadline(req.Context(), effective)
+	// cancel is called by cancelOnCloseBody when the response body closes; standard
+	// pattern for context-wrapping RoundTrippers.
 	req = req.WithContext(ctx)
 	resp, err := t.base.RoundTrip(req)
 	if err != nil {

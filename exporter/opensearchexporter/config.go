@@ -97,19 +97,11 @@ type Config struct {
 
 // OnErrorFlushConfig bounds the dead-letter flush independently of the primary push.
 type OnErrorFlushConfig struct {
-	// Timeout caps every phase of the dead-letter flush:
-	//   * each dead-letter HTTP request (enforced at the transport layer so a stuck
-	//     server cannot block indefinitely),
-	//   * the Add enqueue loop,
-	//   * the Close drain (Timeout plus a small grace to let in-flight callbacks fire).
+	// Timeout caps every phase of the dead-letter flush (HTTP request, Add, Close).
+	// Zero preserves the legacy single-ctx behavior.
 	//
-	// Zero preserves the legacy single-ctx behavior: dead-letter writes share the
-	// push context and inherit its deadline/cancellation.
-	//
-	// This also bounds collector shutdown: shutdown waits up to Timeout + a small
-	// internal grace for the flush to drain. Ensure terminationGracePeriodSeconds
-	// (or equivalent) exceeds Timeout, otherwise the runtime will kill the collector
-	// mid-flush and dead-letter docs may be lost.
+	// Also bounds shutdown: ensure terminationGracePeriodSeconds exceeds Timeout
+	// or dead-letter docs may be lost.
 	Timeout time.Duration `mapstructure:"timeout"`
 }
 

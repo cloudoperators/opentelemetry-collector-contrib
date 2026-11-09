@@ -16,9 +16,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// Timeout=0 preserves the legacy single-ctx behavior: a cancelled parent propagates to
-// Add and the flush exits via "enqueue" failures. This tests the opt-out through the
-// real flush path, not an isolated context helper.
+// Timeout=0 preserves legacy single-ctx behavior: a cancelled parent propagates to Add.
 func TestFlushOnErrorIndexLegacyModeHonorsParentCancel(t *testing.T) {
 	const docCount = 4
 
@@ -55,16 +53,11 @@ func TestFlushOnErrorIndexLegacyModeHonorsParentCancel(t *testing.T) {
 		lbi.appendPermanentError(ferr)
 	}
 
-	// Server must never see a successful dead-letter request: in legacy mode the
-	// cancelled parent flows through Add straight into opensearchutil, so no doc can
-	// complete an HTTP round-trip. This is the opt-out guarantee.
+	// Opt-out guarantee: no dead-letter request completes a round-trip.
 	assert.False(t, deadletterSeen, "legacy mode (timeout=0) must honor parent cancel: server must not see a successful dead-letter request")
 
-	// Legacy mode's known trade-off: Close inherits the cancelled ctx and may return
-	// before wg.Wait() completes, so a small number of docs can be dropped without a
-	// recorded fate. We assert at least some failures were recorded (opt-out isn't a
-	// total black hole) and none were silently misattributed to item_indexing (which
-	// would imply the server responded).
+	// Legacy mode trade-off: Close inherits the cancelled ctx so some docs may be
+	// dropped. Assert accounting is non-zero and no item_indexing was produced.
 	failures := collectInt64Sum(t, reader, "otelcol_opensearch_exporter_on_error_flush_failures")
 	var total int64
 	for reason, v := range failures {
@@ -75,8 +68,8 @@ func TestFlushOnErrorIndexLegacyModeHonorsParentCancel(t *testing.T) {
 	assert.LessOrEqual(t, total, int64(docCount), "failures must not exceed submitted doc count, got %v", failures)
 }
 
-// Positive timeout detaches the Add ctx from an expired parent deadline: dead-letter
-// writes still reach the server and land on real item fates.
+// Positive timeout detaches Add from an expired parent deadline; writes still reach
+// the server.
 func TestFlushOnErrorIndexPositiveTimeoutDetachesFromExpiredParent(t *testing.T) {
 	const docCount = 4
 
@@ -102,8 +95,7 @@ func TestFlushOnErrorIndexPositiveTimeoutDetachesFromExpiredParent(t *testing.T)
 	lbi := newLogBulkIndexer("create", &encodeModel{}, "", &ErrorClassConfig{}, "syslog-deadletter", m, zap.NewNop(), 0)
 	require.NoError(t, lbi.start(client))
 
-	// Populate the dead-letter buffer with a live parent, then flush with an
-	// already-expired parent to prove the detach kicks in.
+	// Populate with a live parent, then flush with an expired one to prove the detach.
 	live, liveCancel := context.WithCancel(t.Context())
 	lbi.submit(live, testLogs(docCount), newIndexResolver("ss4o_logs", "", ""), cfg, time.Now())
 	lbi.close(live)
