@@ -12,7 +12,7 @@ import (
 
 var (
 	Type      = component.MustNewType("kafka")
-	ScopeName = "github.com/cloudoperators/opentelemetry-collector-contrib/exporter/kafkaexporter"
+	ScopeName = "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter"
 )
 
 const (

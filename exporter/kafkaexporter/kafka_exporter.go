@@ -27,11 +27,11 @@ import (
 	"go.opentelemetry.io/collector/pipeline/xpipeline"
 	"go.uber.org/zap"
 
-	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/kafkaclient"
-	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/marshaler"
-	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/metadata"
-	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/traceutil"
-	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/kafka"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/kafkaclient"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/marshaler"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/metadata"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/traceutil"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/kafka"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/batchpersignal"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/kafka/topic"
 )

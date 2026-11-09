@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package kafkaclient // import "github.com/cloudoperators/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/kafkaclient"
+package kafkaclient // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/kafkaclient"
 
 import (
 	"context"
@@ -21,7 +21,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/cloudoperators/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/kafka"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/kafka"
 )
 
 var (
